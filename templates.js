@@ -6,18 +6,18 @@
  * 地图下载结果页面的 HTML 骨架模板。
  * 使用双大括号 `{{...}}` 作为占位符，将在 getHtmlShell 中被替换。
 */
-import HTML_SHELL_TEMPLATE from './assets/main.html';
+import HTML_SHELL_TEMPLATE from './assets/main/index.html';
 
 
 /**
  * 地图搜索页面的 HTML 骨架模板。
  * 注意：搜索结果的渲染逻辑和交互脚本仍然嵌入在模板底部。
  */
-import SEARCH_SHELL_TEMPLATE from './assets/search.html';
+import SEARCH_SHELL_TEMPLATE from './assets/search/index.html';
 
-import diagnosticBlockTemplate from './assets/diagnostic-block.html';
-import autoDownloadScriptTemplate from './assets/auto-download.html';
-import actionButtonTemplate from './assets/action-buttons.html';
+import diagnosticBlockTemplate from './assets/main/diagnostic-block.html';
+import successButtonTemplate from './assets/main/action-button-success.html';
+import disabledButtonTemplate from './assets/main/action-button-disabled.html';
 
 // 导入工具函数
 import { replaceTemplatePlaceholders } from './utils.js';
@@ -41,8 +41,7 @@ function getHtmlShell(params) {
         fileName,
         inlineSizeText,
         actionButton,
-        diagnosticBlock,
-        autoDownloadScript,
+        diagnosticBlock
     } = params;
 
     // 使用对象键值对方式定义所有占位符
@@ -57,8 +56,7 @@ function getHtmlShell(params) {
       FILE_NAME: fileName,
       INLINE_SIZE_TEXT: inlineSizeText,
       ACTION_BUTTON: actionButton,
-      DIAGNOSTIC_BLOCK: diagnosticBlock,
-      AUTO_DOWNLOAD_SCRIPT: autoDownloadScript
+      DIAGNOSTIC_BLOCK: diagnosticBlock
     };
     
     // 使用通用的占位符替换函数
@@ -73,7 +71,7 @@ function getHtmlShell(params) {
  * @returns {Object} 组装后的模板数据
  */
 function assembleTemplateData(data) {
-    const { filePath, fullCheckUrl, finalRedirectUrl, externalStatus, details, fileExists, themeColor } = data;
+    const { filePath, fullCheckUrl, finalRedirectUrl, externalStatus, details, themeColor } = data;
     
     // 准备模板参数
     const templateParams = {
@@ -82,30 +80,19 @@ function assembleTemplateData(data) {
         finalRedirectUrl,
         externalStatus,
         details,
-        fileExists,
         themeColor,
         themeColorHover: themeColor.replace("500", "600"),
         disabledText: externalStatus === 503 ? "服务器连接失败，请稍后再试" : "地图不可用，无法下载"
     };
     
-    // 从HTML文件中提取两个模板
-    const templates = actionButtonTemplate.split('\n\n');
-    const successButtonTemplate = templates[0];
-    const disabledButtonTemplate = templates[1];
-
     // 替换占位符
     const diagnosticBlock = replaceTemplatePlaceholders(diagnosticBlockTemplate, templateParams);
     const actionButtons = fileExists 
         ? replaceTemplatePlaceholders(successButtonTemplate, templateParams)
         : replaceTemplatePlaceholders(disabledButtonTemplate, templateParams);
-    const autoDownloadScript = fileExists 
-        ? replaceTemplatePlaceholders(autoDownloadScriptTemplate, templateParams)
-        : "";
-    
     return {
         diagnosticBlock,
-        actionButtons,
-        autoDownloadScript
+        actionButtons
     };
 }
 

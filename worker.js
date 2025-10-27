@@ -1,4 +1,4 @@
-import { getHtmlShell, getSearchPageHtml } from "./templates.js";
+import { getHtmlShell, getSearchPageHtml, assembleTemplateData } from "./templates.js";
 import { formatBytes } from "./utils.js";
 import { checkFileStatus } from "./api.js";
 
@@ -9,12 +9,43 @@ import { checkFileStatus } from "./api.js";
 function generateHtmlResponse(mapGroup, missionDisplayTitle, checkResult) {
     // 使用新的 assembleTemplateData 函数一次性完成所有数据组装和 HTML 生成
     // checkResult 包含了 { fileExists, fullCheckUrl, externalStatus, details, fileSize, finalRedirectUrl }
-    const { workerStatus, htmlContent } = getHtmlShell(
+    
+    // 根据检查结果设置主题颜色和状态文本
+    const themeColor = checkResult.fileExists ? "#10b981" : (checkResult.externalStatus === 503 ? "#ef4444" : "#6b7280");
+    const statusText = checkResult.fileExists ? "地图可用" : (checkResult.externalStatus === 503 ? "服务器连接失败" : "地图不可用");
+    const cardColor = "#ffffff";
+    const textColor = "#111827";
+    const icon = checkResult.fileExists ? "✓" : "✗";
+    const fileName = `${mapGroup}-${missionDisplayTitle}.7z`;
+    const inlineSizeText = checkResult.fileSize ? formatBytes(checkResult.fileSize) : "未知大小";
+    
+    // 组装模板数据
+    const templateData = assembleTemplateData({
+        ...checkResult,
+        themeColor
+    });
+    
+    // 准备完整的参数对象
+    const params = {
         mapGroup,
         missionDisplayTitle,
-        checkResult,
-        formatBytes // 传递格式化函数
-    );
+        statusText,
+        themeColor,
+        cardColor,
+        textColor,
+        icon,
+        fileName,
+        inlineSizeText,
+        actionButton: templateData.actionButtons,
+        diagnosticBlock: templateData.diagnosticBlock,
+        autoDownloadScript: templateData.autoDownloadScript
+    };
+    
+    // 获取HTML内容
+    const htmlContent = getHtmlShell(params);
+    
+    // 设置适当的状态码
+    const workerStatus = checkResult.fileExists ? 200 : (checkResult.externalStatus === 503 ? 503 : 404);
 
     return new Response(htmlContent, {
         headers: { "content-type": "text/html;charset=UTF-8" },

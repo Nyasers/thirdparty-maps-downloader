@@ -43,3 +43,5 @@ coverage/
 *.tmp
 *.temp
 .cache/
+.wrangler/
+.rollup-cache/

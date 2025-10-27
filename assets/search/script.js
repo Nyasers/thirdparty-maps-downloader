@@ -1,5 +1,5 @@
-import searchResultItemTemplate from './search-result-item.html';
-import { replaceTemplatePlaceholders } from '../utils.js';
+import searchResultItemTemplate from './result-item.html';
+import { replaceTemplatePlaceholders } from '../../utils.js';
 
 // 搜索表单提交处理
 document.getElementById('search-form').addEventListener('submit', function (e) {

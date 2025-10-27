@@ -6,17 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>[三方{{MAP_GROUP}}] {{MISSION_DISPLAY_TITLE}} - {{STATUS_TEXT}}</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        body {
-            background-color: #f7f9fb;
-            font-family: 'Inter', sans-serif;
-        }
-
-        /* 确保背景色能够完全覆盖 */
-        .min-h-screen {
-            min-height: 100vh;
-        }
-    </style>
+    <link rel="stylesheet" href="./styles.css" />
 </head>
 
 <body class="p-4 flex items-center justify-center min-h-screen">
@@ -51,7 +41,7 @@
             {{DIAGNOSTIC_BLOCK}}
         </div>
     </div>
-    {{AUTO_DOWNLOAD_SCRIPT}}
+    <script src="./auto-download.js"></script>
 </body>
 
 </html>
