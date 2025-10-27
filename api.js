@@ -1,4 +1,3 @@
-// --- FILE: api.js (外部服务交互文件) -----------------------------------------
 const CHECK_BASE_URL = "https://maps.nyase.ru/d";
 
 /**

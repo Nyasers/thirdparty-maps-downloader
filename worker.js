@@ -1,7 +1,4 @@
-// --- FILE: worker.js (主逻辑/路由文件) ----------------------------------------
-// Cloudflare Worker 框架 (ES Module)
-
-import { assembleTemplateData, getSearchPageHtml } from "./templates.js";
+import { getHtmlShell, getSearchPageHtml } from "./templates.js";
 import { formatBytes } from "./utils.js";
 import { checkFileStatus } from "./api.js";
 
@@ -12,7 +9,7 @@ import { checkFileStatus } from "./api.js";
 function generateHtmlResponse(mapGroup, missionDisplayTitle, checkResult) {
     // 使用新的 assembleTemplateData 函数一次性完成所有数据组装和 HTML 生成
     // checkResult 包含了 { fileExists, fullCheckUrl, externalStatus, details, fileSize, finalRedirectUrl }
-    const { workerStatus, htmlContent } = assembleTemplateData(
+    const { workerStatus, htmlContent } = getHtmlShell(
         mapGroup,
         missionDisplayTitle,
         checkResult,
@@ -42,7 +39,7 @@ export default {
 
         // --- catch-all 路由处理 ---
         // 将所有非根路径请求重定向到主页。
-        if(url.pathname !== "/") {
+        if (url.pathname !== "/") {
             url.pathname = '/';
             return Response.redirect(url.href, 308);
         }
@@ -53,7 +50,7 @@ export default {
         // 如果是 POST 请求则尝试从请求体中解析 JSON 或 FormData
         else if (request.method === "POST") {
             let mapGroup, missionDisplayTitle;
-            
+
             try {
                 const contentType = request.headers.get("content-type") || "";
 
@@ -84,7 +81,7 @@ export default {
                 const redirectUrl = "https://l4d2server.com/map";
                 return Response.redirect(redirectUrl, 302);
             }
-            
+
             // 检查文件状态
             const checkResult = await checkFileStatus(mapGroup, missionDisplayTitle);
             // 返回 HTML 响应

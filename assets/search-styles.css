@@ -1,0 +1,13 @@
+body {
+    background-color: #f7f9fb;
+    font-family: 'Inter', sans-serif;
+}
+
+.min-h-screen {
+    min-height: 100vh;
+}
+
+/* 隐藏默认的 HTML5 验证错误提示，让自定义消息更容易实现 */
+input:invalid {
+    box-shadow: none;
+}

@@ -1,7 +1,5 @@
 {
   "name": "thirdparty-maps-downloader",
   "compatibility_date": "2025-10-24",
-  "assets": {
-    "directory": "./dist"
-  }
+  "main": "./dist/worker.js"
 }
