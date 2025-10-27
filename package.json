@@ -1,0 +1,14 @@
+{
+  "name": "thirdparty-maps-downloader",
+  "version": "1.0.0",
+  "description": "Third-party maps downloader",
+  "type": "module",
+  "scripts": {
+    "build": "rollup -c"
+  },
+  "devDependencies": {
+    "rollup": "^3.29.4",
+    "@rollup/plugin-node-resolve": "^15.2.3",
+    "@rollup/plugin-terser": "^0.4.4"
+  }
+}

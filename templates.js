@@ -6,14 +6,14 @@
  * 地图下载结果页面的 HTML 骨架模板。
  * 使用双大括号 `{{...}}` 作为占位符，将在 getHtmlShell 中被替换。
 */
-import HTML_SHELL_TEMPLATE from 'assets/main.js';
+import HTML_SHELL_TEMPLATE from './assets/main.js';
 
 
 /**
  * 地图搜索页面的 HTML 骨架模板。
  * 注意：搜索结果的渲染逻辑和交互脚本仍然嵌入在模板底部。
  */
-import SEARCH_SHELL_TEMPLATE from 'assets/search.js';
+import SEARCH_SHELL_TEMPLATE from './assets/search.js';
 
 // --- 函数实现 -----------------------------------------------------------
 
