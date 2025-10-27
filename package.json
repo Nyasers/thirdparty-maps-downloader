@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "rollup -c",
-    "dev": "rollup -c && wrangler dev"
+    "dev": "rollup -c && npx wrangler dev"
   },
   "devDependencies": {
     "@babel/core": "^7.28.5",

@@ -71,7 +71,7 @@ function getHtmlShell(params) {
  * @returns {Object} 组装后的模板数据
  */
 function assembleTemplateData(data) {
-    const { filePath, fullCheckUrl, finalRedirectUrl, externalStatus, details, themeColor } = data;
+    const { filePath, fullCheckUrl, finalRedirectUrl, externalStatus, details, themeColor, fileExists } = data;
     
     // 准备模板参数
     const templateParams = {

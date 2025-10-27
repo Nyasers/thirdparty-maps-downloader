@@ -37,8 +37,7 @@ function generateHtmlResponse(mapGroup, missionDisplayTitle, checkResult) {
         fileName,
         inlineSizeText,
         actionButton: templateData.actionButtons,
-        diagnosticBlock: templateData.diagnosticBlock,
-        autoDownloadScript: templateData.autoDownloadScript
+        diagnosticBlock: templateData.diagnosticBlock
     };
     
     // 获取HTML内容
