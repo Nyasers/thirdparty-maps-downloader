@@ -41,24 +41,26 @@ function getHtmlShell(params) {
         fileName,
         inlineSizeText,
         actionButton,
-        diagnosticBlock
+        diagnosticBlock,
+        finalRedirectUrl = '' // 添加finalRedirectUrl参数，用于JavaScript替换
     } = params;
 
     // 使用对象键值对方式定义所有占位符
     const placeholders = {
-      MAP_GROUP: mapGroup,
-      MISSION_DISPLAY_TITLE: missionDisplayTitle,
-      STATUS_TEXT: statusText,
-      THEME_COLOR: themeColor,
-      CARD_COLOR: cardColor,
-      TEXT_COLOR: textColor,
-      ICON: icon,
-      FILE_NAME: fileName,
-      INLINE_SIZE_TEXT: inlineSizeText,
-      ACTION_BUTTON: actionButton,
-      DIAGNOSTIC_BLOCK: diagnosticBlock
+        MAP_GROUP: mapGroup,
+        MISSION_DISPLAY_TITLE: missionDisplayTitle,
+        STATUS_TEXT: statusText,
+        THEME_COLOR: themeColor,
+        CARD_COLOR: cardColor,
+        TEXT_COLOR: textColor,
+        ICON: icon,
+        FILE_NAME: fileName,
+        INLINE_SIZE_TEXT: inlineSizeText,
+        ACTION_BUTTON: actionButton,
+        DIAGNOSTIC_BLOCK: diagnosticBlock,
+        finalRedirectUrl: finalRedirectUrl // 添加finalRedirectUrl到占位符中
     };
-    
+
     // 使用通用的占位符替换函数
     const html = replaceTemplatePlaceholders(HTML_SHELL_TEMPLATE, placeholders);
 
@@ -72,7 +74,11 @@ function getHtmlShell(params) {
  */
 function assembleTemplateData(data) {
     const { filePath, fullCheckUrl, finalRedirectUrl, externalStatus, details, themeColor, fileExists } = data;
-    
+
+    // 确保themeColor是正确的Tailwind类名格式，而不是直接的颜色值
+    const formattedThemeColor = themeColor.startsWith('bg-') ? themeColor : 'bg-green-500';
+    const formattedThemeColorHover = formattedThemeColor.replace("500", "600");
+
     // 准备模板参数
     const templateParams = {
         filePath,
@@ -80,14 +86,14 @@ function assembleTemplateData(data) {
         finalRedirectUrl,
         externalStatus,
         details,
-        themeColor,
-        themeColorHover: themeColor.replace("500", "600"),
+        themeColor: formattedThemeColor,
+        themeColorHover: formattedThemeColorHover,
         disabledText: externalStatus === 503 ? "服务器连接失败，请稍后再试" : "地图不可用，无法下载"
     };
-    
+
     // 替换占位符
     const diagnosticBlock = replaceTemplatePlaceholders(diagnosticBlockTemplate, templateParams);
-    const actionButtons = fileExists 
+    const actionButtons = fileExists
         ? replaceTemplatePlaceholders(successButtonTemplate, templateParams)
         : replaceTemplatePlaceholders(disabledButtonTemplate, templateParams);
     return {

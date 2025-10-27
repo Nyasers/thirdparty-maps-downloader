@@ -28,7 +28,7 @@ async function processJsFile(jsPath) {
     }
 
     console.log(`使用rollup处理JS文件: ${jsPath}`);
-    
+
     // 创建一个临时的rollup配置来处理单个JS文件
     const bundle = await rollup({
       input: jsPath,
@@ -48,14 +48,14 @@ async function processJsFile(jsPath) {
 
     // 获取打包后的代码
     let bundledCode = output[0].code;
-    
+
     // 使用terser压缩打包后的代码
     try {
-      const minified = await minify(bundledCode, { 
+      const minified = await minify(bundledCode, {
         compress: { passes: 2 },
         mangle: { toplevel: true }
       });
-      
+
       if (minified.error) {
         console.warn(`JS压缩失败，使用原始打包内容: ${jsPath}`, minified.error);
       } else if (minified.code !== undefined) {
@@ -108,16 +108,16 @@ async function processHtmlFile(htmlPath) {
     // 1. 处理CSS文件 - 压缩并内联
     htmlContent = htmlContent.replace(/<link\s+rel="stylesheet"\s+href="(?!https:\/\/)(\.?\/?[^"]+)"\s*\/?>/g, (match, cssFilePath) => {
       try {
-        const cssFullPath = cssFilePath.startsWith('.') 
-          ? resolve(htmlDir, cssFilePath) 
+        const cssFullPath = cssFilePath.startsWith('.')
+          ? resolve(htmlDir, cssFilePath)
           : resolve(htmlDir, 'assets', cssFilePath);
-        
+
         if (existsSync(cssFullPath)) {
           let cssContent = readFileSync(cssFullPath, 'utf-8');
-          
+
           // 使用csso进行专业的CSS压缩
           cssContent = csso.minify(cssContent).css;
-          
+
           console.log(`已压缩并内联CSS文件: ${cssFilePath}`);
           return `<style>${cssContent}</style>`;
         }
@@ -136,18 +136,18 @@ async function processHtmlFile(htmlPath) {
       jsMatches.push({ match, jsFilePath });
       return match;
     });
-    
+
     // 逐个处理JS文件，支持递归处理HTML导入
     for (const { match, jsFilePath } of jsMatches) {
       try {
-        const jsFullPath = jsFilePath.startsWith('.') 
-          ? resolve(htmlDir, jsFilePath) 
+        const jsFullPath = jsFilePath.startsWith('.')
+          ? resolve(htmlDir, jsFilePath)
           : resolve(htmlDir, 'assets', jsFilePath);
-          
+
         if (existsSync(jsFullPath)) {
           // 使用processJsFile函数处理JS文件（先rollup打包再压缩）
           const bundledAndMinifiedJs = await processJsFile(jsFullPath);
-          
+
           // 替换HTML中的script标签
           htmlContent = htmlContent.replace(match, `<script>${bundledAndMinifiedJs}</script>`);
           console.log(`已成功处理并内联JS文件: ${jsFilePath}`);
@@ -194,14 +194,14 @@ async function processHtmlFile(htmlPath) {
 function htmlProcessorPlugin() {
   return {
     name: 'html-processor-plugin',
-    
+
     // 加载HTML文件并处理其中的CSS和JS引用
     async load(id) {
       if (id.endsWith('.html')) {
         try {
           // 处理HTML文件，包括CSS压缩和JS编译
           const processedHtml = await processHtmlFile(id);
-          
+
           // 将处理后的HTML转换为JS模块导出
           const escapedHtml = JSON.stringify(processedHtml);
           return `export default ${escapedHtml};`;

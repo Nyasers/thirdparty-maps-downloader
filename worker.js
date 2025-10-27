@@ -9,22 +9,24 @@ import { checkFileStatus } from "./api.js";
 function generateHtmlResponse(mapGroup, missionDisplayTitle, checkResult) {
     // 使用新的 assembleTemplateData 函数一次性完成所有数据组装和 HTML 生成
     // checkResult 包含了 { fileExists, fullCheckUrl, externalStatus, details, fileSize, finalRedirectUrl }
-    
+
     // 根据检查结果设置主题颜色和状态文本
-    const themeColor = checkResult.fileExists ? "#10b981" : (checkResult.externalStatus === 503 ? "#ef4444" : "#6b7280");
+    // 使用正确的Tailwind CSS类名格式，而不是直接的颜色值
+    // 将未找到地图的状态从灰色改为橙色，提供更好的视觉区分
+    const themeColor = checkResult.fileExists ? "bg-green-500" : (checkResult.externalStatus === 503 ? "bg-red-500" : "bg-orange-500");
     const statusText = checkResult.fileExists ? "地图可用" : (checkResult.externalStatus === 503 ? "服务器连接失败" : "地图不可用");
-    const cardColor = "#ffffff";
-    const textColor = "#111827";
+    const cardColor = "bg-white";
+    const textColor = "text-gray-900";
     const icon = checkResult.fileExists ? "✓" : "✗";
     const fileName = `${mapGroup}-${missionDisplayTitle}.7z`;
     const inlineSizeText = checkResult.fileSize ? formatBytes(checkResult.fileSize) : "未知大小";
-    
+
     // 组装模板数据
     const templateData = assembleTemplateData({
         ...checkResult,
         themeColor
     });
-    
+
     // 准备完整的参数对象
     const params = {
         mapGroup,
@@ -37,12 +39,13 @@ function generateHtmlResponse(mapGroup, missionDisplayTitle, checkResult) {
         fileName,
         inlineSizeText,
         actionButton: templateData.actionButtons,
-        diagnosticBlock: templateData.diagnosticBlock
+        diagnosticBlock: templateData.diagnosticBlock,
+        finalRedirectUrl: checkResult.finalRedirectUrl // 确保finalRedirectUrl被传递给getHtmlShell
     };
-    
+
     // 获取HTML内容
     const htmlContent = getHtmlShell(params);
-    
+
     // 设置适当的状态码
     const workerStatus = checkResult.fileExists ? 200 : (checkResult.externalStatus === 503 ? 503 : 404);
 
