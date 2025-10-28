@@ -1,13 +1,38 @@
-import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
-import { rollup } from 'rollup';
-import { nodeResolve } from '@rollup/plugin-node-resolve';
+import * as rollup from 'rollup';
+import * as pluginNodeResolve from '@rollup/plugin-node-resolve';
 import rollupTerser from '@rollup/plugin-terser';
 import * as csso from 'csso';
-import { minify } from 'terser';
-import { minify as minifyHtml } from 'html-minifier-terser';
+import * as terser from 'terser';
+import * as htmlMinifierTerser from 'html-minifier-terser';
+import * as crypto from 'crypto';
+
+// 生成内容的哈希值，用于资源命名
+function generateHash(content) {
+  return crypto.createHash('md5').update(content).digest('hex');
+}
+
+// 映射表，存储原始路径到哈希路径的映射
+const originalToHashedPathMap = new Map();
+
+// 生成哈希化的资源路径
+function generateHashedAssetPath(originalPath, content, extension) {
+  // 检查是否已经为这个原始路径生成过哈希路径
+  if (originalToHashedPathMap.has(originalPath)) {
+    return originalToHashedPathMap.get(originalPath);
+  }
+
+  // 生成哈希值
+  const hash = generateHash(content);
+  // 创建新的哈希路径，不需要扩展名，通过HTTP头指定内容类型
+  const hashedPath = `/assets/${hash}`;
+
+  // 存储映射关系
+  originalToHashedPathMap.set(originalPath, hashedPath);
+
+  return hashedPath;
+}
 
 // 确保缓存目录存在
 const cacheDir = '.rollup-cache';
@@ -45,6 +70,9 @@ function processCssFile(cssPath) {
     const importRegex = /@import\s+["']([^"']+)['"]\s*;/g;
     const cssDir = path.dirname(cssPath);
 
+    // 存储导入的CSS文件的哈希路径，用于在HTML中添加link标签
+    const importedCssPaths = [];
+
     // 处理导入语句
     let match;
     while ((match = importRegex.exec(originalContent)) !== null) {
@@ -55,15 +83,23 @@ function processCssFile(cssPath) {
         const importFullPath = path.resolve(cssDir, importPath);
         if (fs.existsSync(importFullPath)) {
           console.log(`处理导入的CSS文件: ${importFullPath}`);
-          const importedCssContent = processCssFile(importFullPath);
+          const importedResult = processCssFile(importFullPath);
+          const importedCssContent = importedResult.content;
 
-          // 为导入的CSS文件创建独立的资源映射
-          const importRelativePath = importFullPath.replace(path.resolve(process.cwd(), 'assets'), '');
-          const importAssetPath = `/assets${importRelativePath.replace(/\\/g, '/')}`;
+          // 为导入的CSS文件创建独立的资源映射，使用哈希路径
+          const hashedAssetPath = generateHashedAssetPath(importFullPath, importedCssContent, 'css');
 
-          if (!assetMap.has(importAssetPath)) {
-            assetMap.set(importAssetPath, createAssetEntry(importedCssContent, 'text/css'));
-            console.log(`已为导入的CSS文件创建映射: ${importAssetPath}`);
+          if (!assetMap.has(hashedAssetPath)) {
+            assetMap.set(hashedAssetPath, createAssetEntry(importedCssContent, 'text/css'));
+            console.log(`已为导入的CSS文件创建哈希映射: ${hashedAssetPath}`);
+          }
+
+          // 保存导入的CSS文件的哈希路径
+          importedCssPaths.push(hashedAssetPath);
+
+          // 合并所有嵌套导入的路径
+          if (typeof importedResult === 'object' && importedResult.importedPaths) {
+            importedCssPaths.push(...importedResult.importedPaths);
           }
         }
       }
@@ -76,9 +112,15 @@ function processCssFile(cssPath) {
     console.log(`使用csso压缩CSS文件: ${cssPath}`);
     const minifiedCss = csso.minify(cssContent).css;
 
+    // 创建返回对象，包含压缩后的CSS内容和导入的CSS路径
+    const result = {
+      content: minifiedCss,
+      importedPaths: importedCssPaths
+    };
+
     // 缓存处理后的内容
-    processedCssCache.set(cssPath, minifiedCss);
-    return minifiedCss;
+    processedCssCache.set(cssPath, result);
+    return result;
   } catch (error) {
     console.error(`处理CSS文件出错 ${cssPath}:`, error);
     // 如果处理失败，尝试读取原始CSS内容
@@ -102,10 +144,10 @@ async function processJsFile(jsPath) {
     console.log(`使用rollup处理JS文件: ${jsPath}`);
 
     // 创建一个临时的rollup配置来处理单个JS文件
-    const bundle = await rollup({
+    const bundle = await rollup.rollup({
       input: jsPath,
       plugins: [
-        nodeResolve(),
+        pluginNodeResolve.nodeResolve(),
         // 使用相同的HTML处理插件，以支持递归处理HTML导入
         htmlProcessorPlugin()
       ],
@@ -157,20 +199,30 @@ async function processHtmlFile(htmlPath) {
           : path.resolve(htmlDir, 'assets', cssFilePath);
 
         if (fs.existsSync(cssFullPath)) {
-          // 使用简化的CSS处理函数
-          let cssContent = processCssFile(cssFullPath);
+          // 使用简化的CSS处理函数，获取处理结果（包含导入的CSS路径）
+          const cssResult = processCssFile(cssFullPath);
+          const cssContent = cssResult.content;
 
-          // 构建/assets路径，确保使用正斜杠
-          const relativePath = cssFullPath.replace(path.resolve(process.cwd(), 'assets'), '');
-          const assetPath = `/assets${relativePath.replace(/\\/g, '/')}`;
+          // 使用哈希路径替代原始路径
+          const hashedAssetPath = generateHashedAssetPath(cssFullPath, cssContent, 'css');
 
           // 将处理后的CSS内容添加到资源映射中
-          assetMap.set(assetPath, createAssetEntry(cssContent, 'text/css'));
+          assetMap.set(hashedAssetPath, createAssetEntry(cssContent, 'text/css'));
 
-          console.log(`已处理CSS文件并映射到: ${assetPath}`);
+          console.log(`已处理CSS文件并映射到哈希路径: ${hashedAssetPath}`);
 
-          // 返回简化的link标签
-          return `<link rel="stylesheet" href="${assetPath}" />`;
+          // 创建导入的CSS文件的link标签
+          let importLinks = '';
+          if (typeof cssResult === 'object' && cssResult.importedPaths) {
+            for (const importedPath of cssResult.importedPaths) {
+              importLinks += `<link rel="stylesheet" href="${importedPath}" />
+`;
+              console.log(`已为导入的CSS添加link标签: ${importedPath}`);
+            }
+          }
+
+          // 返回使用哈希路径的link标签，以及所有导入的CSS的link标签
+          return importLinks + `<link rel="stylesheet" href="${hashedAssetPath}" />`;
         }
         console.warn(`CSS文件未找到: ${cssFullPath}`);
         return match;
@@ -259,7 +311,7 @@ async function processHtmlFile(htmlPath) {
 
         // 使用terser统一压缩所有JS代码
         try {
-          const minified = await minify(jsContent, { compress: { passes: 2 }, mangle: { toplevel: true } });
+          const minified = await terser.minify(jsContent, { compress: { passes: 2 }, mangle: { toplevel: true } });
 
           if (minified.error) {
             console.warn(`JS压缩失败，使用原始内容: ${jsFilePath}`, minified.error);
@@ -271,19 +323,20 @@ async function processHtmlFile(htmlPath) {
           console.warn(`JS压缩过程出错，使用原始内容: ${jsFilePath}`, minifyError);
         }
 
-        // 构建/assets路径
+        // 构建完整路径
         const jsFullPath = jsFilePath.startsWith('.')
           ? path.resolve(htmlDir, jsFilePath)
           : path.resolve(htmlDir, 'assets', jsFilePath);
-        // 构建/assets路径，确保使用正斜杠
-        const relativePath = jsFullPath.replace(path.resolve(process.cwd(), 'assets'), '').replace(/\\/g, '/');
-        const assetPath = `/assets${relativePath}`;
-        // 将处理后的JS内容添加到资源映射中
-        assetMap.set(assetPath, createAssetEntry(jsContent, 'application/javascript'));
 
-        // 替换为指向/assets路径的引用
-        htmlContent = htmlContent.replace(match, `<script src="${assetPath}"></script>`);
-        console.log(`已处理JS文件并映射到: ${assetPath}`);
+        // 使用哈希路径替代原始路径
+        const hashedAssetPath = generateHashedAssetPath(jsFullPath, jsContent, 'js');
+
+        // 将处理后的JS内容添加到资源映射中
+        assetMap.set(hashedAssetPath, createAssetEntry(jsContent, 'application/javascript'));
+
+        // 替换为指向哈希路径的引用
+        htmlContent = htmlContent.replace(match, `<script src="${hashedAssetPath}"></script>`);
+        console.log(`已处理JS文件并映射到哈希路径: ${hashedAssetPath}`);
       } catch (error) {
         console.error(`处理JS文件出错 ${jsFilePath}:`, error);
         // 出错时保留原始引用
@@ -292,7 +345,7 @@ async function processHtmlFile(htmlPath) {
 
     // 使用html-minifier-terser进行专业HTML压缩
     try {
-      const minifiedHtml = await minifyHtml(htmlContent, {
+      const minifiedHtml = await htmlMinifierTerser.minify(htmlContent, {
         collapseBooleanAttributes: true,
         collapseWhitespace: true,
         decodeEntities: true,
@@ -347,13 +400,12 @@ function htmlProcessorPlugin() {
     transform(code, id) {
       // 对于CSS文件，确保它们被添加到资源映射中
       if (id.endsWith('.css')) {
-        // 构建/assets路径，确保使用正斜杠
-        const relativePath = id.replace(path.resolve(process.cwd(), 'assets'), '');
-        const assetPath = `/assets${relativePath.replace(/\\/g, '/')}`;
+        // 使用哈希路径替代原始路径
+        const hashedAssetPath = generateHashedAssetPath(id, code, 'css');
 
         // 直接将CSS内容添加到资源映射中
-        assetMap.set(assetPath, createAssetEntry(code, 'text/css'));
-        console.log(`在transform钩子中添加CSS资源: ${assetPath}`);
+        assetMap.set(hashedAssetPath, createAssetEntry(code, 'text/css'));
+        console.log(`在transform钩子中添加CSS资源(哈希路径): ${hashedAssetPath}`);
       }
       return null;
     }
@@ -369,7 +421,7 @@ const mainConfig = {
     compact: false // 不启用压缩
   },
   plugins: [
-    nodeResolve(),
+    pluginNodeResolve.nodeResolve(),
     htmlProcessorPlugin(), // 先处理HTML和资源，填充assetMap
     assetMapReplacementPlugin(), // 替换handler.js中的assets对象为实际资源映射
     rollupTerser({
@@ -393,7 +445,7 @@ const mainConfig = {
           const workerContent = fs.readFileSync(workerPath, 'utf8');
 
           // 使用terser进行最大程度压缩，不保留任何变量名
-          const result = await minify(workerContent, {
+          const result = await terser.minify(workerContent, {
             mangle: {
               toplevel: true,
               eval: true,

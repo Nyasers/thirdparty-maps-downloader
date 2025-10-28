@@ -9,7 +9,6 @@ import diagnosticBlockTemplate from './assets/main/diagnostic-block.html';
 
 // 导入工具函数
 import { replaceTemplatePlaceholders, formatBytes } from './utils.js';
-import { checkFileStatus } from './api.js';
 
 // --- 函数实现 -----------------------------------------------------------
 
