@@ -136,16 +136,20 @@ function performSearch(params, page = 1) {
 
                 if (data.data.records && data.data.records.length > 0) {
                     renderResults(data.data.records, paginationInfo.current, paginationInfo.total);
-                    updatePaginationControls();
                 } else {
                     // 未找到匹配的地图
                     resultsContainer.innerHTML = `<p class="text-center text-red-500 font-semibold">未找到匹配的地图。</p>`;
-                    document.getElementById('pagination-container').classList.add('hidden');
                 }
+                // 始终更新分页控件，确保正确显示状态
+                updatePaginationControls();
             } else {
                 // 数据格式不正确或API返回异常
                 resultsContainer.innerHTML = `<p class="text-center text-red-500 font-semibold">获取数据失败，请稍后重试。</p>`;
-                document.getElementById('pagination-container').classList.add('hidden');
+                // 重置分页信息
+                paginationInfo.total = 0;
+                paginationInfo.current = 1;
+                // 更新分页控件状态
+                updatePaginationControls();
             }
         })
         .catch(error => {
@@ -155,7 +159,11 @@ function performSearch(params, page = 1) {
             searchButton.disabled = false;
             console.error('Search failed:', error);
             resultsContainer.innerHTML = `<p class="text-center text-red-500">搜索失败：服务器或网络错误。</p>`;
-            document.getElementById('pagination-container').classList.add('hidden');
+            // 重置分页信息
+            paginationInfo.total = 0;
+            paginationInfo.current = 1;
+            // 更新分页控件状态
+            updatePaginationControls();
         });
 }
 
@@ -220,5 +228,23 @@ function renderResults(records, currentPage, totalRecords) {
     container.innerHTML = html;
 }
 
+// 自动执行初始搜索
+function performInitialSearch() {
+    // 设置默认搜索参数
+    currentSearchParams = {
+        mapGroup: '', // 空字符串表示搜索所有地图组
+        query: ''     // 空字符串表示不指定特定搜索词
+    };
+
+    // 重置到第一页
+    paginationInfo.current = 1;
+
+    // 执行搜索
+    performSearch(currentSearchParams, 1);
+}
+
 // 页面加载完成后初始化
-window.addEventListener('load', initPaginationControls);
+window.addEventListener('load', function () {
+    initPaginationControls();
+    performInitialSearch(); // 页面初次加载时自动执行搜索
+});
