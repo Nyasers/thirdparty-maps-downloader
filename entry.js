@@ -1,5 +1,5 @@
 import { generateSearchResponse } from "./templates.js";
-import { handleApiRequest, handleFormSubmission } from "./handler.js";
+import { handleApiRequest, handleFormSubmission, handleAssetRequest } from "./handler.js";
 
 /**
  * Cloudflare Worker 的主请求处理函数
@@ -9,14 +9,21 @@ export default {
     async fetch(request, env, ctx) {
         const url = new URL(request.url);
 
+        // --- 路由处理 ---
+        // 处理/api路径的API请求
+        if (url.pathname.startsWith('/api')) {
+            return handleApiRequest(request, url);
+        }
+        // 处理/assets路径的资源请求
+        else if (url.pathname.startsWith('/assets')) {
+            return handleAssetRequest(request, url);
+        }
         // 特殊处理 /favicon.ico 和 /.well-known 请求，返回204
-        if (url.pathname === '/favicon.ico' || url.pathname.startsWith('/.well-known')) {
+        else if (url.pathname === '/favicon.ico' || url.pathname.startsWith('/.well-known')) {
             return new Response(null, { status: 204 });
         }
-
-        // --- catch-all 路由处理 ---
-        // 将所有非根路径或API请求重定向到主页
-        if (url.pathname !== "/" && !url.pathname.startsWith('/api')) {
+        // 将所有非根路径、非API请求和非资源请求重定向到主页
+        else if (url.pathname !== "/") {
             url.pathname = '/';
             return Response.redirect(url.href, 308);
         }
@@ -27,11 +34,7 @@ export default {
         }
         // 处理POST请求
         else if (request.method === "POST") {
-            if (url.pathname.startsWith('/api')) {
-                return handleApiRequest(request, url);
-            } else {
-                return handleFormSubmission(request);
-            }
+            return handleFormSubmission(request);
         }
         // 将所有不支持的方法重定向为 GET
         else {

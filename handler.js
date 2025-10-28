@@ -1,6 +1,10 @@
 import { generateHtmlResponse } from "./templates.js";
 import { checkFileStatus, processL4D2ServerRequest } from "./api.js";
 
+// 全局资源映射对象，将在构建时被替换为实际内容
+// 格式: { path: { content: '...', type: 'content-type' } }
+let assets = {};
+
 /**
  * 处理API请求的代理功能
  */
@@ -61,6 +65,38 @@ export async function handleApiRequest(request, url) {
             status: 500
         });
     }
+}
+
+/**
+ * 处理/assets路径的资源请求
+ */
+export function handleAssetRequest(request, url) {
+    const assetPath = url.pathname;
+    console.log('处理资源请求:', assetPath);
+
+    // 从资源映射中获取对应的内容
+    if (assets[assetPath]) {
+        const { content, type } = assets[assetPath];
+
+        return new Response(content, {
+            headers: {
+                'Content-Type': type || 'text/plain',
+                'Cache-Control': 'public, max-age=3600'
+            },
+            status: 200
+        });
+    }
+
+    // 如果资源不存在，返回404
+    return new Response(JSON.stringify({
+        error: '资源不存在',
+        path: assetPath
+    }), {
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        status: 404
+    });
 }
 
 /**
