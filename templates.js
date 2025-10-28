@@ -1,23 +1,11 @@
 // --- FILE: templates.js (HTML 模板文件) --------------------------------------
 
 // --- HTML 模板常量集 ----------------------------------------------------
-
-/**
- * 地图下载结果页面的 HTML 骨架模板。
- * 使用双大括号 `{{...}}` 作为占位符，将在 getHtmlShell 中被替换。
-*/
-import HTML_SHELL_TEMPLATE from './assets/main/index.html';
-
-
-/**
- * 地图搜索页面的 HTML 骨架模板。
- * 注意：搜索结果的渲染逻辑和交互脚本仍然嵌入在模板底部。
- */
-import SEARCH_SHELL_TEMPLATE from './assets/search/index.html';
-
-import diagnosticBlockTemplate from './assets/main/diagnostic-block.html';
+import htmlShellTemplate from './assets/main/index.html';
+import searchShellTemplate from './assets/search/index.html';
 import successButtonTemplate from './assets/main/action-button-success.html';
 import disabledButtonTemplate from './assets/main/action-button-disabled.html';
+import diagnosticBlockTemplate from './assets/main/diagnostic-block.html';
 
 // 导入工具函数
 import { replaceTemplatePlaceholders } from './utils.js';
@@ -29,7 +17,7 @@ import { replaceTemplatePlaceholders } from './utils.js';
  * @param {object} params 所有需要填充到模板中的动态变量
  * @returns {string} 完整的 HTML 字符串
  */
-function getHtmlShell(params) {
+export function getHtmlShell(params) {
     const {
         mapGroup,
         missionDisplayTitle,
@@ -62,7 +50,7 @@ function getHtmlShell(params) {
     };
 
     // 使用通用的占位符替换函数
-    const html = replaceTemplatePlaceholders(HTML_SHELL_TEMPLATE, placeholders);
+    const html = replaceTemplatePlaceholders(htmlShellTemplate, placeholders);
 
     return html.trim();
 }
@@ -72,7 +60,7 @@ function getHtmlShell(params) {
  * @param {Object} data 数据对象
  * @returns {Object} 组装后的模板数据
  */
-function assembleTemplateData(data) {
+export function assembleTemplateData(data) {
     const { filePath, fullCheckUrl, finalRedirectUrl, externalStatus, details, themeColor, fileExists } = data;
 
     // 确保themeColor是正确的Tailwind类名格式，而不是直接的颜色值
@@ -109,7 +97,7 @@ function assembleTemplateData(data) {
  */
 function getSearchShell(mapGroupOptions) {
     // 使用通用的占位符替换函数
-    return replaceTemplatePlaceholders(SEARCH_SHELL_TEMPLATE, { MAP_GROUP_OPTIONS: mapGroupOptions }).trim();
+    return replaceTemplatePlaceholders(searchShellTemplate, { MAP_GROUP_OPTIONS: mapGroupOptions }).trim();
 }
 
 /**
@@ -133,5 +121,3 @@ export function getSearchPageHtml() {
 
     return getSearchShell(optionsHtml);
 }
-
-export { getHtmlShell, getSearchShell, assembleTemplateData };
