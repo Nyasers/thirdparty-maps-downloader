@@ -239,8 +239,10 @@ function performInitialSearch() {
     // 重置到第一页
     paginationInfo.current = 1;
 
-    // 执行搜索
-    performSearch(currentSearchParams, 1);
+    // 添加500ms延迟后执行搜索
+    setTimeout(() => {
+        performSearch(currentSearchParams, 1);
+    }, 500);
 }
 
 // 页面加载完成后初始化
