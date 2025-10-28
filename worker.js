@@ -70,6 +70,11 @@ export default {
     async fetch(request, env, ctx) {
         const url = new URL(request.url);
 
+        // 特殊处理 /favicon.ico 和 /.well-known 请求，返回204
+        if (url.pathname === '/favicon.ico' || url.pathname.startsWith('/.well-known')) {
+            return new Response(null, { status: 204 });
+        }
+
         // --- catch-all 路由处理 ---
         // 将所有非根路径请求重定向到主页。
         if (url.pathname !== "/") {

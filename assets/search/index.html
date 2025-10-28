@@ -53,8 +53,40 @@
             <p class="text-center text-gray-500" id="initial-message">请在上方输入关键词进行搜索。</p>
         </div>
 
-        <p class="mt-6 text-xs text-gray-400 text-center border-t pt-4">该页面仅显示前 100 条结果，供测试使用，友情链接：<a
-                href='https://l4d2server.com/map' style='color:blue'>求生之路2三方图列表</a></p>
+        <!-- 分页控件区域 -->
+        <div id="pagination-container" class="mt-6 border-t pt-4">
+            <div class="flex flex-col md:flex-row justify-between items-center space-y-4 md:space-y-0">
+                <div class="text-sm text-gray-500">
+                    共 <span id="total-records">0</span> 条记录，每页
+                    <select id="page-size-select" class="mx-1 px-2 py-0.5 text-sm border rounded bg-white">
+                        <option value="30">30</option>
+                        <option value="60">60</option>
+                        <option value="100">100</option>
+                    </select>
+                    条，共 <span id="total-pages">0</span> 页
+                </div>
+                <div class="flex items-center space-x-1">
+                    <button id="prev-page"
+                        class="px-3 py-1 text-sm border rounded-md hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled>
+                        上一页
+                    </button>
+                    <span class="text-sm px-2">
+                        <input type="number" id="current-page" min="1" value="1"
+                            class="w-12 text-center border rounded px-1 py-0.5" />
+                        / <span id="total-pages-display">0</span>
+                    </span>
+                    <button id="next-page"
+                        class="px-3 py-1 text-sm border rounded-md hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled>
+                        下一页
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <p class="mt-6 text-xs text-gray-400 text-center border-t pt-4">友情链接：<a href='https://l4d2server.com/map'
+                style='color:blue'>求生之路2三方图列表</a></p>
     </div>
 
     <script type="module" src="./script.js"></script>
