@@ -259,9 +259,9 @@ function htmlProcessorPlugin() {
   };
 }
 
-// 主配置 - 从worker.js入口点开始处理
+// 主配置 - 从entry.js入口点开始处理
 const mainConfig = {
-  input: 'worker.js',
+  input: 'entry.js',
   output: {
     file: 'dist/worker.js',
     format: 'es',

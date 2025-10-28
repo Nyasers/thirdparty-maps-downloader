@@ -1,4 +1,62 @@
-const CHECK_BASE_URL = "https://maps.nyase.ru/d";
+const MAP_API_BASE_URL = "https://maps.nyase.ru/d";
+const SEARCH_API_BASE_URL = "https://l4d2server.com/l4d2/backend";
+
+/**
+ * 处理对l4d2server.com的请求
+ * @param {string} path API路径
+ * @param {object} body 请求体数据
+ * @returns {Promise<object>} 处理后的响应数据f
+ */
+export async function processL4D2ServerRequest(path, body) {
+  try {
+    console.log('处理l4d2server.com请求，路径:', path);
+
+    const apiUrl = SEARCH_API_BASE_URL + path;
+    console.log('转发请求到目标API:', apiUrl);
+
+    // 转发请求到目标API
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    });
+
+    console.log('目标API响应状态:', response.status);
+
+    // 尝试以文本形式获取响应体，无论是否是JSON
+    const responseText = await response.text();
+
+    // 尝试解析为JSON，如果失败则作为文本返回
+    let responseBody;
+    try {
+      responseBody = JSON.parse(responseText);
+      console.log('响应体解析为JSON成功');
+    } catch (jsonError) {
+      console.log('响应体不是有效的JSON，作为文本返回:', responseText.substring(0, 100) + '...');
+      // 如果不是JSON，创建一个包含文本的对象
+      responseBody = {
+        success: response.ok,
+        status: response.status,
+        text: responseText
+      };
+    }
+
+    return {
+      success: true,
+      status: response.status,
+      body: responseBody
+    };
+  } catch (error) {
+    console.error('处理l4d2server.com请求时发生错误:', error.message);
+    return {
+      success: false,
+      error: '请求处理失败',
+      details: error.message
+    };
+  }
+}
 
 /**
  * Performs the external file availability check and file size check.
@@ -11,7 +69,7 @@ const CHECK_BASE_URL = "https://maps.nyase.ru/d";
 export async function checkFileStatus(mapGroup, missionDisplayTitle) {
   // 目标格式: /{mapGroup}/{mapGroup}-${missionDisplayTitle}.7z
   const filePath = `/${mapGroup}/${mapGroup}-${missionDisplayTitle}.7z`;
-  const fullCheckUrl = CHECK_BASE_URL + filePath;
+  const fullCheckUrl = MAP_API_BASE_URL + encodeURI(filePath);
 
   let fileExists = false;
   let externalStatus = 0;

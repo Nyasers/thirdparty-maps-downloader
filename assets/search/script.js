@@ -99,8 +99,8 @@ function performSearch(params, page = 1) {
     spinner.classList.remove('hidden');
     resultsContainer.innerHTML = `<p class="text-center text-gray-500">正在努力搜索中...</p>`;
 
-    // 目标 API URL
-    const apiUrl = 'https://l4d2server.com/l4d2/backend/mapMission/list';
+    // 使用本地代理API端点来规避CORS问题
+    const apiUrl = '/api/map/search';
 
     const payload = {
         mapGroup: params.mapGroup,

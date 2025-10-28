@@ -8,7 +8,8 @@ import disabledButtonTemplate from './assets/main/action-button-disabled.html';
 import diagnosticBlockTemplate from './assets/main/diagnostic-block.html';
 
 // 导入工具函数
-import { replaceTemplatePlaceholders } from './utils.js';
+import { replaceTemplatePlaceholders, formatBytes } from './utils.js';
+import { checkFileStatus } from './api.js';
 
 // --- 函数实现 -----------------------------------------------------------
 
@@ -120,4 +121,68 @@ export function getSearchPageHtml() {
         .join("");
 
     return getSearchShell(optionsHtml);
+}
+
+/**
+ * 根据文件检查结果生成一个用户友好的 HTML 响应页面。
+ * 负责收集所有动态数据并调用模板。
+ */
+export function generateHtmlResponse(mapGroup, missionDisplayTitle, checkResult) {
+    // 使用新的 assembleTemplateData 函数一次性完成所有数据组装和 HTML 生成
+    // checkResult 包含了 { fileExists, fullCheckUrl, externalStatus, details, fileSize, finalRedirectUrl }
+
+    // 根据检查结果设置主题颜色和状态文本
+    // 使用正确的Tailwind CSS类名格式，而不是直接的颜色值
+    // 将未找到地图的状态从灰色改为橙色，提供更好的视觉区分
+    const themeColor = checkResult.fileExists ? "bg-green-500" : (checkResult.externalStatus === 503 ? "bg-red-500" : "bg-orange-500");
+    const statusText = checkResult.fileExists ? "地图可用" : (checkResult.externalStatus === 503 ? "服务器连接失败" : "地图不可用");
+    const cardColor = "bg-white";
+    const textColor = "text-gray-900";
+    const icon = checkResult.fileExists ? "✓" : "✗";
+    const fileName = `${mapGroup}-${missionDisplayTitle}.7z`;
+    const inlineSizeText = checkResult.fileSize ? formatBytes(checkResult.fileSize) : "未知大小";
+
+    // 组装模板数据
+    const templateData = assembleTemplateData({
+        ...checkResult,
+        themeColor
+    });
+
+    // 准备完整的参数对象
+    const params = {
+        mapGroup,
+        missionDisplayTitle,
+        statusText,
+        themeColor,
+        cardColor,
+        textColor,
+        icon,
+        fileName,
+        inlineSizeText,
+        actionButton: templateData.actionButtons,
+        diagnosticBlock: templateData.diagnosticBlock,
+        finalRedirectUrl: checkResult.finalRedirectUrl // 确保finalRedirectUrl被传递给getHtmlShell
+    };
+
+    // 获取HTML内容
+    const htmlContent = getHtmlShell(params);
+
+    // 设置适当的状态码
+    const workerStatus = checkResult.fileExists ? 200 : (checkResult.externalStatus === 503 ? 503 : 404);
+
+    return new Response(htmlContent, {
+        headers: { "content-type": "text/html;charset=UTF-8" },
+        status: workerStatus,
+    });
+}
+
+/**
+ * 生成搜索页面响应
+ */
+export function generateSearchResponse() {
+    const htmlContent = getSearchPageHtml();
+    return new Response(htmlContent, {
+        headers: { "content-type": "text/html;charset=UTF-8" },
+        status: 200,
+    });
 }
