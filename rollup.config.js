@@ -19,7 +19,7 @@ const processedHtmlCache = new Map();
 // 缓存已处理的JS内容，避免重复处理
 const processedJsCache = new Map();
 
-// 使用rollup处理JS文件（支持模块导入和HTML导入）
+// 使用rollup处理JS文件（只打包不压缩，支持模块导入和HTML导入）
 async function processJsFile(jsPath) {
   try {
     // 检查缓存
@@ -43,30 +43,11 @@ async function processJsFile(jsPath) {
     // 生成输出
     const { output } = await bundle.generate({
       format: 'es',
-      compact: false // 先不压缩，后面会用terser压缩
+      compact: false // 不压缩，后面会统一由terser压缩
     });
 
-    // 获取打包后的代码
-    let bundledCode = output[0].code;
-
-    // 使用terser压缩打包后的代码
-    try {
-      const minified = await minify(bundledCode, {
-        compress: { passes: 2 },
-        mangle: { toplevel: true }
-      });
-
-      if (minified.error) {
-        console.warn(`JS压缩失败，使用原始打包内容: ${jsPath}`, minified.error);
-      } else if (minified.code !== undefined) {
-        bundledCode = minified.code;
-        console.log(`已使用terser压缩JS文件: ${jsPath}`);
-      } else {
-        console.warn(`JS压缩结果不包含代码，使用原始打包内容: ${jsPath}`);
-      }
-    } catch (error) {
-      console.warn(`JS压缩过程出错，使用原始打包内容: ${jsPath}`, error);
-    }
+    // 获取打包后的代码（不压缩）
+    const bundledCode = output[0].code;
 
     // 缓存处理后的内容
     processedJsCache.set(jsPath, bundledCode);
@@ -76,16 +57,7 @@ async function processJsFile(jsPath) {
     // 如果rollup处理失败，尝试直接读取文件内容作为后备
     try {
       const fallbackCode = readFileSync(jsPath, 'utf-8');
-      try {
-        const minified = await minify(fallbackCode);
-        if (minified.error || minified.code === undefined) {
-          return fallbackCode;
-        }
-        return minified.code;
-      } catch (minifyError) {
-        console.warn(`后备JS压缩失败，使用原始内容: ${jsPath}`, minifyError);
-        return fallbackCode;
-      }
+      return fallbackCode;
     } catch (fallbackError) {
       console.error(`读取JS文件作为后备失败: ${jsPath}`, fallbackError);
       throw error;
@@ -129,33 +101,105 @@ async function processHtmlFile(htmlPath) {
       }
     });
 
-    // 2. 处理JS文件 - 使用rollup进行模块化打包，再压缩嵌入
-    // 先找到所有匹配的JS引用
-    const jsMatches = [];
-    htmlContent.replace(/<script\s+(?:type="module"\s+)?src="(?!https:\/\/)([^"]+)"\s*\/?><\/script>/g, (match, jsFilePath) => {
-      jsMatches.push({ match, jsFilePath });
+    // 2. 处理JS文件
+    // 2.1 先找到所有module类型的JS引用（使用rollup处理）
+    const moduleJsMatches = [];
+    htmlContent.replace(/<script\s+type="module"\s+src="(?!https:\/\/)([^"]+)"\s*\/?><\/script>/g, (match, jsFilePath) => {
+      moduleJsMatches.push({ match, jsFilePath });
       return match;
     });
 
-    // 逐个处理JS文件，支持递归处理HTML导入
-    for (const { match, jsFilePath } of jsMatches) {
+    // 2.2 找到所有普通JS引用（后续统一压缩）
+    const regularJsMatches = [];
+    htmlContent.replace(/<script\s+(?!type="module")[^>]*src="(?!https:\/\/)([^"]+)"\s*\/?><\/script>/g, (match, jsFilePath) => {
+      regularJsMatches.push({ match, jsFilePath });
+      return match;
+    });
+
+    // 统一处理所有JS文件的队列
+    const allJsToProcess = [];
+
+    // 2.3 处理module类型的JS文件（使用rollup处理后加入统一队列）
+    for (const { match, jsFilePath } of moduleJsMatches) {
       try {
         const jsFullPath = jsFilePath.startsWith('.')
           ? resolve(htmlDir, jsFilePath)
           : resolve(htmlDir, 'assets', jsFilePath);
 
         if (existsSync(jsFullPath)) {
-          // 使用processJsFile函数处理JS文件（先rollup打包再压缩）
-          const bundledAndMinifiedJs = await processJsFile(jsFullPath);
+          // 使用processJsFile函数处理JS文件（只rollup打包不压缩）
+          const bundledJs = await processJsFile(jsFullPath);
 
-          // 替换HTML中的script标签
-          htmlContent = htmlContent.replace(match, `<script>${bundledAndMinifiedJs}</script>`);
-          console.log(`已成功处理并内联JS文件: ${jsFilePath}`);
+          // 将rollup处理后的代码加入统一处理队列
+          allJsToProcess.push({
+            match,
+            jsFilePath,
+            content: bundledJs,
+            isModule: true
+          });
         } else {
           console.warn(`JS文件未找到: ${jsFullPath}`);
         }
       } catch (error) {
         console.error(`处理JS文件出错 ${jsFilePath}:`, error);
+        // 出错时保留原始引用
+      }
+    }
+
+    // 2.4 将普通JS文件加入统一处理队列
+    for (const { match, jsFilePath } of regularJsMatches) {
+      try {
+        const jsFullPath = jsFilePath.startsWith('.')
+          ? resolve(htmlDir, jsFilePath)
+          : resolve(htmlDir, 'assets', jsFilePath);
+
+        if (existsSync(jsFullPath)) {
+          // 读取普通JS文件内容
+          const jsContent = readFileSync(jsFullPath, 'utf-8');
+
+          // 加入统一处理队列
+          allJsToProcess.push({
+            match,
+            jsFilePath,
+            content: jsContent,
+            isModule: false
+          });
+        } else {
+          console.warn(`JS文件未找到: ${jsFullPath}`);
+        }
+      } catch (error) {
+        console.error(`读取JS文件出错 ${jsFilePath}:`, error);
+        // 出错时保留原始引用
+      }
+    }
+
+    // 2.5 统一处理所有JS文件（使用terser压缩）
+    for (const { match, jsFilePath, content, isModule } of allJsToProcess) {
+      try {
+        let jsContent = content;
+
+        // 使用terser统一压缩所有JS代码
+        try {
+          const minified = await minify(jsContent, {
+            compress: { passes: 2 },
+            mangle: { toplevel: true }
+          });
+
+          if (minified.error) {
+            console.warn(`JS压缩失败，使用原始内容: ${jsFilePath}`, minified.error);
+          } else if (minified.code !== undefined) {
+            jsContent = minified.code;
+            console.log(`已使用terser压缩JS文件: ${jsFilePath}`);
+          }
+        } catch (minifyError) {
+          console.warn(`JS压缩过程出错，使用原始内容: ${jsFilePath}`, minifyError);
+        }
+
+        // 统一作为普通JS文件内联（不保留type="module"）
+        htmlContent = htmlContent.replace(match, `<script>${jsContent}</script>`);
+        console.log(`已成功内联JS文件: ${jsFilePath}`);
+      } catch (error) {
+        console.error(`内联JS文件出错 ${jsFilePath}:`, error);
         // 出错时保留原始引用
       }
     }
