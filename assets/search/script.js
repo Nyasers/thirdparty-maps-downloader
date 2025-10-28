@@ -198,14 +198,10 @@ function renderResults(records, currentPage, totalRecords) {
         const templateData = {
             missionDisplayTitle: record.missionDisplayTitle,
             mapGroup: record.mapGroup,
-            mapGroupLabel: record.mapGroup ? `三方${record.mapGroup}` : '官方',
+            mapGroupLabel: `三方${record.mapGroup}`,
             connectedCount: record.connectedCount,
             score: record.score,
-            scoreCount: record.scoreCount,
-            disabled: record.mapGroup ? '' : ' disabled',
-            buttonBgColor: record.mapGroup ? 'blue-500' : 'gray-400',
-            buttonHoverColor: record.mapGroup ? 'blue-600' : 'gray-500',
-            cursorType: record.mapGroup ? 'pointer' : 'not-allowed'
+            scoreCount: record.scoreCount
         };
 
         // 使用模板渲染HTML

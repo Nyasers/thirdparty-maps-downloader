@@ -110,7 +110,6 @@ export function getSearchPageHtml() {
     const defaultMapGroups = [
         { value: "A", label: "三方A" },
         { value: "B", label: "三方B" },
-        { value: "", label: "全部" },
     ];
 
     const optionsHtml = defaultMapGroups
