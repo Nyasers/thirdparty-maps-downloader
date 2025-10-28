@@ -230,19 +230,8 @@ function renderResults(records, currentPage, totalRecords) {
 
 // 自动执行初始搜索
 function performInitialSearch() {
-    // 设置默认搜索参数
-    currentSearchParams = {
-        mapGroup: '', // 空字符串表示搜索所有地图组
-        query: ''     // 空字符串表示不指定特定搜索词
-    };
-
-    // 重置到第一页
-    paginationInfo.current = 1;
-
-    // 添加500ms延迟后执行搜索
-    setTimeout(() => {
-        performSearch(currentSearchParams, 1);
-    }, 500);
+    // 模拟点击搜索按钮，触发搜索表单提交事件
+    document.getElementById('search-button').click();
 }
 
 // 页面加载完成后初始化
