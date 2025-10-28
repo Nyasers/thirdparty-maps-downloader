@@ -195,10 +195,18 @@ function renderResults(records, currentPage, totalRecords) {
 
     records.forEach(record => {
         // 准备模板数据
+        // 预处理完整的地图组标签，包含子组信息
+        let mapGroupLabelWithSubGroup = `三方${record.mapGroup}`;
+        if (record.mapSubGroup) {
+            // 转换子组格式：数字 -> 地图组字母+两位数字（如1 -> A01）
+            const formattedSubGroup = `${record.mapGroup}${String(record.mapSubGroup).padStart(2, '0')}`;
+            mapGroupLabelWithSubGroup += ` (${formattedSubGroup})`;
+        }
+
         const templateData = {
             missionDisplayTitle: record.missionDisplayTitle,
             mapGroup: record.mapGroup,
-            mapGroupLabel: `三方${record.mapGroup}`,
+            mapGroupLabel: mapGroupLabelWithSubGroup,
             connectedCount: record.connectedCount,
             score: record.score,
             scoreCount: record.scoreCount
