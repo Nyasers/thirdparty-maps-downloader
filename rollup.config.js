@@ -35,16 +35,16 @@ function generateHashedAssetPath(originalPath, content, extension) {
 }
 
 // 缓存目录路径
-const cacheDir = '.rollup-cache';
+const distDir = 'dist';
 
 // 清空缓存文件夹的函数
 function clearCacheDir() {
   try {
-    if (fs.existsSync(cacheDir)) {
-      console.log(`清空缓存文件夹: ${cacheDir}`);
-      const files = fs.readdirSync(cacheDir);
+    if (fs.existsSync(distDir)) {
+      console.log(`清空缓存文件夹: ${distDir}`);
+      const files = fs.readdirSync(distDir);
       for (const file of files) {
-        const filePath = path.join(cacheDir, file);
+        const filePath = path.join(distDir, file);
         if (fs.statSync(filePath).isDirectory()) {
           // 递归删除子目录
           fs.rmSync(filePath, { recursive: true, force: true });
@@ -64,9 +64,9 @@ function clearCacheDir() {
 clearCacheDir();
 
 // 确保缓存目录存在
-if (!fs.existsSync(cacheDir)) {
-  fs.mkdirSync(cacheDir, { recursive: true });
-  console.log(`已创建缓存文件夹: ${cacheDir}`);
+if (!fs.existsSync(distDir)) {
+  fs.mkdirSync(distDir, { recursive: true });
+  console.log(`已创建缓存文件夹: ${distDir}`);
 }
 
 // 缓存已处理的HTML内容，避免重复处理
@@ -88,7 +88,7 @@ function createAssetEntry(assetContent, contentType) {
 function saveIntermediateFile(filePath, contentType, content) {
   try {
     // 为不同类型的中间产物创建子目录
-    const intermediateDir = path.join(cacheDir, contentType);
+    const intermediateDir = path.join(distDir, contentType);
     // 确保子目录存在
     if (!fs.existsSync(intermediateDir)) {
       fs.mkdirSync(intermediateDir, { recursive: true });
@@ -110,15 +110,27 @@ function saveIntermediateFile(filePath, contentType, content) {
       finalFilePath += '.js';
     } else if (contentType === 'html' && !finalFilePath.endsWith('.html')) {
       finalFilePath += '.html';
-    } else if (contentType === 'minified_js' && !finalFilePath.endsWith('.min.js')) {
-      finalFilePath += '.min.js';
-    } else if (contentType === 'minified_css' && !finalFilePath.endsWith('.min.css')) {
-      finalFilePath += '.min.css';
+    } else if (contentType === 'minified_js') {
+      // 避免重复添加.min.js扩展名
+      if (!finalFilePath.endsWith('.min.js') && !finalFilePath.endsWith('.js')) {
+        finalFilePath += '.min.js';
+      } else if (!finalFilePath.endsWith('.min.js') && finalFilePath.endsWith('.js')) {
+        // 如果已经是.js后缀，替换为.min.js
+        finalFilePath = finalFilePath.replace(/\.js$/, '.min.js');
+      }
+    } else if (contentType === 'minified_css') {
+      // 避免重复添加.min.css扩展名
+      if (!finalFilePath.endsWith('.min.css') && !finalFilePath.endsWith('.css')) {
+        finalFilePath += '.min.css';
+      } else if (!finalFilePath.endsWith('.min.css') && finalFilePath.endsWith('.css')) {
+        // 如果已经是.css后缀，替换为.min.css
+        finalFilePath = finalFilePath.replace(/\.css$/, '.min.css');
+      }
     }
 
     // 保存到磁盘
     fs.writeFileSync(finalFilePath, typeof content === 'object' ? JSON.stringify(content, null, 2) : content);
-    console.log(`已保存中间产物到磁盘: ${finalFilePath}`);
+    console.log(`已保存中间产物到磁盘: ${finalFilePath} (${fs.statSync(finalFilePath).size} 字节)`);
   } catch (error) {
     console.error(`保存中间产物到磁盘失败 ${filePath}:`, error);
   }
@@ -528,24 +540,28 @@ const mainConfig = {
           const workerContent = fs.readFileSync(workerPath, 'utf8');
 
           // 保存二次压缩前的worker.js内容
-          const preCompressPath = path.join(cacheDir, 'worker', 'worker.js');
-          // 确保worker子目录存在
-          if (!fs.existsSync(path.join(cacheDir, 'worker'))) {
-            fs.mkdirSync(path.join(cacheDir, 'worker'), { recursive: true });
-          }
-          fs.writeFileSync(preCompressPath, workerContent);
-          console.log(`已保存二次压缩前的worker.js: ${preCompressPath} (${fs.statSync(preCompressPath).size} 字节)`);
+          const preCompressPath = path.join(distDir, 'worker.js');
+          console.log(`二次压缩前的worker.js: ${preCompressPath} (${fs.statSync(preCompressPath).size} 字节)`);
 
-          // 使用terser进行最大程度压缩，不保留任何变量名
+          // 使用terser进行最大程度压缩，优化压缩配置以获得更好的压缩效果
           const result = await terser.minify(workerContent, {
             mangle: {
               toplevel: true,
               eval: true,
               keep_fnames: false,
-              // 不保留assets变量名，允许完全压缩
+              // 添加属性压缩，进一步减小文件体积
+              properties: {
+                keep_quoted: false,
+                reserved: []
+              }
             },
             compress: {
-              passes: 5,
+              // 增加压缩次数以获得更好效果
+              passes: 2,
+              // 启用更激进的压缩选项
+              pure_getters: true,
+              toplevel: true,
+              module: true,
               drop_console: true,
               drop_debugger: true,
               dead_code: true,
@@ -555,8 +571,18 @@ const mainConfig = {
               if_return: true,
               join_vars: true,
               reduce_vars: true,
-              pure_funcs: ['console.log', 'console.debug', 'console.info'],
-              pure_getters: true,
+              // 移除更多未使用的代码
+              hoist_funs: true,
+              hoist_vars: true,
+              // 优化循环结构
+              loops: true,
+              // 合并变量声明
+              collapse_vars: true,
+              // 内联简单函数
+              inline: true,
+              // 移除更多console函数
+              pure_funcs: ['console.log', 'console.debug', 'console.info', 'console.warn', 'console.error'],
+              // 不安全优化选项
               unsafe: true,
               unsafe_arrows: true,
               unsafe_comps: true,
@@ -568,21 +594,24 @@ const mainConfig = {
               unsafe_undefined: true
             },
             format: {
-              comments: false
-            }
+              comments: false,
+              // 优化输出格式
+              beautify: false,
+              // 使用更紧凑的语法
+              braces: false,
+              semicolons: false
+            },
+            // 启用ECMAScript最新特性以提高压缩效果
+            ecma: 9999
           });
 
           if (result.error) {
             console.error('terser额外压缩失败:', result.error);
           } else {
             // 保存二次压缩后的worker.js内容
-            const postCompressPath = path.join(cacheDir, 'worker', 'worker.min.js');
+            const postCompressPath = path.join(distDir, 'worker.min.js');
             fs.writeFileSync(postCompressPath, result.code);
-            console.log(`已保存二次压缩后的worker.js: ${postCompressPath} (${fs.statSync(postCompressPath).size} 字节)`);
-
-            // 写回压缩后的内容
-            fs.writeFileSync(workerPath, result.code);
-            console.log('worker.js额外压缩完成');
+            console.log(`二次压缩后的worker.js: ${postCompressPath} (${fs.statSync(postCompressPath).size} 字节)`);
           }
         }
       }
