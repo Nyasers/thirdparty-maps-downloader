@@ -2,6 +2,10 @@
   "name": "thirdparty-maps-downloader",
   "compatibility_date": "2025-10-24",
   "main": "./dist/worker.min.js",
+  "assets": {
+    "directory": "./dist/assets",
+    "binding": "ASSETS"
+  },
   "placement": {
     "mode": "smart"
   }

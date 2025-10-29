@@ -1,10 +1,6 @@
 import { generateHtmlResponse } from "./templates.js";
 import { checkFileStatus, processL4D2ServerRequest } from "./api.js";
 
-// 全局资源映射对象，将在构建时被替换为实际内容
-// 格式: { path: { content: '...', type: 'content-type' } }
-let assets = {};
-
 /**
  * 处理API请求的代理功能
  */
@@ -70,33 +66,35 @@ export async function handleApiRequest(request, url) {
 /**
  * 处理/assets路径的资源请求
  */
-export function handleAssetRequest(request, url) {
+export async function handleAssetRequest(request, url, env) {
     const assetPath = url.pathname;
     console.log('处理资源请求:', assetPath);
 
-    // 从资源映射中获取对应的内容
-    if (assets[assetPath]) {
-        const { content, type } = assets[assetPath];
+    // 创建一个新的URL，去掉/assets前缀
+    const cleanPath = assetPath.replace(/^\/assets/, '');
+    const newUrl = new URL(request.url);
+    newUrl.pathname = cleanPath;
 
-        return new Response(content, {
+    // 创建一个新的请求对象，使用修改后的URL
+    const newRequest = new Request(newUrl.toString(), request);
+
+    // 使用Cloudflare Workers Static Assets来获取和返回静态资源
+    try {
+        return await env.ASSETS.fetch(newRequest);
+    } catch (error) {
+        console.error('获取静态资源失败:', error.message);
+        // 如果获取失败，返回404
+        return new Response(JSON.stringify({
+            error: '资源不存在或获取失败',
+            path: assetPath,
+            details: error
+        }), {
             headers: {
-                'Content-Type': type || 'text/plain',
-                'Cache-Control': 'public, max-age=3600'
+                'Content-Type': 'application/json'
             },
-            status: 200
+            status: 404
         });
     }
-
-    // 如果资源不存在，返回404
-    return new Response(JSON.stringify({
-        error: '资源不存在',
-        path: assetPath
-    }), {
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        status: 404
-    });
 }
 
 /**

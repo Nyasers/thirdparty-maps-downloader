@@ -16,7 +16,7 @@ export default {
         }
         // 处理/assets路径的资源请求
         else if (url.pathname.startsWith('/assets')) {
-            return handleAssetRequest(request, url);
+            return handleAssetRequest(request, url, env);
         }
         // 特殊处理 /favicon.ico 和 /.well-known 请求，返回204
         else if (url.pathname === '/favicon.ico' || url.pathname.startsWith('/.well-known')) {

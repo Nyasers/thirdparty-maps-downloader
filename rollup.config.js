@@ -519,13 +519,8 @@ const mainConfig = {
   plugins: [
     pluginNodeResolve.nodeResolve(),
     htmlProcessorPlugin(), // 先处理HTML和资源，填充assetMap
-    assetMapReplacementPlugin(), // 替换handler.js中的assets对象为实际资源映射
-    rollupTerser({
-      // 保留assets变量名不被替换
-      mangle: {
-        reserved: ['assets']
-      }
-    }),         // 最后压缩代码，保留assets变量名
+    assetFileOutputPlugin(), // 将资源保存到dist/assets目录
+    rollupTerser(),         // 压缩代码
     {
       name: 'post-build-terser',
       // 在输出文件后执行额外的terser压缩
@@ -536,7 +531,7 @@ const mainConfig = {
         );
 
         if (workerFile) {
-          console.log('开始使用terser对worker.js进行额外压缩，不保留变量名...');
+          console.log('开始使用terser对worker.js进行额外压缩...');
           const workerPath = path.resolve('dist', 'worker.js');
           const workerContent = fs.readFileSync(workerPath, 'utf8');
 
@@ -611,47 +606,40 @@ const mainConfig = {
   preserveModules: false
 };
 
-// 创建资源映射替换插件 - 在最终生成时替换资源映射
-function assetMapReplacementPlugin() {
+// 创建资源文件输出插件 - 将处理后的资源保存到dist/assets目录
+function assetFileOutputPlugin() {
+  const assetsDir = path.join(distDir, 'assets');
+
   return {
-    name: 'asset-map-replacement',
+    name: 'asset-file-output',
 
-    // 在所有资源处理完成并生成最终bundle时替换assets对象
+    // 确保assets目录存在
+    buildStart() {
+      if (!fs.existsSync(assetsDir)) {
+        fs.mkdirSync(assetsDir, { recursive: true });
+        console.log(`已创建assets目录: ${assetsDir}`);
+      }
+    },
+
+    // 在生成最终bundle之前将资源保存为文件
     generateBundle(options, bundle) {
-      console.log('generateBundle钩子执行，开始替换资源映射');
-      console.log('最终资源映射数量:', assetMap.size);
+      console.log('generateBundle钩子执行，开始输出静态资源文件');
 
-      // 获取最终的资源映射内容
-      const finalAssets = Object.fromEntries(assetMap);
-      console.log('资产映射内容:', Object.keys(finalAssets));
+      // 遍历所有资源并保存为文件
+      for (const [assetPath, assetEntry] of assetMap.entries()) {
+        // 从路径中提取文件名 (格式: /assets/hash -> hash)
+        const fileName = assetPath.replace(/^\/assets\//, '');
+        const filePath = path.join(assetsDir, fileName);
 
-      // 遍历所有生成的chunk
-      for (const fileName in bundle) {
-        if (bundle[fileName].type === 'chunk') {
-          const chunk = bundle[fileName];
-          console.log(`检查chunk: ${fileName}`);
-
-          // 尝试多种替换模式，确保找到assets对象
-          const pattern = /let\s+assets\s*=\s*\{[\s\S]*?\};?/;
-
-          let replaced = false;
-          if (pattern.test(chunk.code)) {
-            console.log(`使用模式匹配到assets对象，准备替换`);
-            chunk.code = chunk.code.replace(pattern, `let assets = ${JSON.stringify(finalAssets)};`);
-            replaced = true;
-            break;
-          }
-
-          if (replaced) {
-            console.log(`已成功替换assets对象，资源映射数量:`, Object.keys(finalAssets).length);
-          } else {
-            console.log(`警告: 未在chunk中找到assets对象定义模式`);
-            // 保存原始代码以供调试
-            const debugCode = chunk.code.substring(0, 500);
-            console.log(`代码片段前500字符:`, debugCode);
-          }
+        try {
+          fs.writeFileSync(filePath, assetEntry.content);
+          console.log(`已保存静态资源: ${filePath}`);
+        } catch (error) {
+          console.error(`保存静态资源失败 ${filePath}:`, error);
         }
       }
+
+      console.log(`静态资源输出完成，共 ${assetMap.size} 个文件`);
     }
   };
 }
