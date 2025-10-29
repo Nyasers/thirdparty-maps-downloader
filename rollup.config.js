@@ -34,10 +34,39 @@ function generateHashedAssetPath(originalPath, content, extension) {
   return hashedPath;
 }
 
-// 确保缓存目录存在
+// 缓存目录路径
 const cacheDir = '.rollup-cache';
+
+// 清空缓存文件夹的函数
+function clearCacheDir() {
+  try {
+    if (fs.existsSync(cacheDir)) {
+      console.log(`清空缓存文件夹: ${cacheDir}`);
+      const files = fs.readdirSync(cacheDir);
+      for (const file of files) {
+        const filePath = path.join(cacheDir, file);
+        if (fs.statSync(filePath).isDirectory()) {
+          // 递归删除子目录
+          fs.rmSync(filePath, { recursive: true, force: true });
+        } else {
+          // 删除文件
+          fs.unlinkSync(filePath);
+        }
+      }
+      console.log('缓存文件夹已清空');
+    }
+  } catch (error) {
+    console.error(`清空缓存文件夹时出错:`, error);
+  }
+}
+
+// 每次编译前清空缓存文件夹
+clearCacheDir();
+
+// 确保缓存目录存在
 if (!fs.existsSync(cacheDir)) {
   fs.mkdirSync(cacheDir, { recursive: true });
+  console.log(`已创建缓存文件夹: ${cacheDir}`);
 }
 
 // 缓存已处理的HTML内容，避免重复处理
@@ -55,10 +84,50 @@ function createAssetEntry(assetContent, contentType) {
   return { content: assetContent, type: contentType };
 }
 
+// 保存中间产物到磁盘（仅保存，不从磁盘加载）
+function saveIntermediateFile(filePath, contentType, content) {
+  try {
+    // 为不同类型的中间产物创建子目录
+    const intermediateDir = path.join(cacheDir, contentType);
+    // 确保子目录存在
+    if (!fs.existsSync(intermediateDir)) {
+      fs.mkdirSync(intermediateDir, { recursive: true });
+    }
+
+    // 获取相对于项目根目录的路径，处理不同文件夹中相同名称文件的情况
+    const relativePath = path.relative(process.cwd(), filePath);
+    // 替换路径分隔符为下划线，避免创建子目录结构
+    const safeFileName = relativePath.replace(/\\/g, '_').replace(/\//g, '_');
+
+    // 生成中间产物文件路径
+    const intermediateFilePath = path.join(intermediateDir, safeFileName);
+
+    // 根据内容类型设置扩展名
+    let finalFilePath = intermediateFilePath;
+    if (contentType === 'css' && !finalFilePath.endsWith('.css')) {
+      finalFilePath += '.css';
+    } else if (contentType === 'js' && !finalFilePath.endsWith('.js')) {
+      finalFilePath += '.js';
+    } else if (contentType === 'html' && !finalFilePath.endsWith('.html')) {
+      finalFilePath += '.html';
+    } else if (contentType === 'minified_js' && !finalFilePath.endsWith('.min.js')) {
+      finalFilePath += '.min.js';
+    } else if (contentType === 'minified_css' && !finalFilePath.endsWith('.min.css')) {
+      finalFilePath += '.min.css';
+    }
+
+    // 保存到磁盘
+    fs.writeFileSync(finalFilePath, typeof content === 'object' ? JSON.stringify(content, null, 2) : content);
+    console.log(`已保存中间产物到磁盘: ${finalFilePath}`);
+  } catch (error) {
+    console.error(`保存中间产物到磁盘失败 ${filePath}:`, error);
+  }
+}
+
 // 处理CSS文件，简化版本，移除tailwind cli依赖
 function processCssFile(cssPath) {
   try {
-    // 检查缓存
+    // 检查内存缓存（只使用内存缓存，不从磁盘加载）
     if (processedCssCache.has(cssPath)) {
       return processedCssCache.get(cssPath);
     }
@@ -118,8 +187,12 @@ function processCssFile(cssPath) {
       importedPaths: importedCssPaths
     };
 
-    // 缓存处理后的内容
+    // 缓存处理后的内容到内存
     processedCssCache.set(cssPath, result);
+    // 保存原始CSS内容（移除import后的内容）到磁盘
+    saveIntermediateFile(cssPath, 'css', cssContent);
+    // 保存压缩后的CSS内容
+    saveIntermediateFile(cssPath, 'minified_css', result.content);
     return result;
   } catch (error) {
     console.error(`处理CSS文件出错 ${cssPath}:`, error);
@@ -136,7 +209,7 @@ function processCssFile(cssPath) {
 // 使用rollup处理JS文件（只打包不压缩，支持模块导入和HTML导入）
 async function processJsFile(jsPath) {
   try {
-    // 检查缓存
+    // 检查内存缓存（只使用内存缓存，不从磁盘加载）
     if (processedJsCache.has(jsPath)) {
       return processedJsCache.get(jsPath);
     }
@@ -163,8 +236,10 @@ async function processJsFile(jsPath) {
     // 获取打包后的代码（不压缩）
     const bundledCode = output[0].code;
 
-    // 缓存处理后的内容
+    // 缓存处理后的内容到内存
     processedJsCache.set(jsPath, bundledCode);
+    // 保存中间产物到磁盘（保存rollup处理后的JS）
+    saveIntermediateFile(jsPath, 'js', bundledCode);
     return bundledCode;
   } catch (error) {
     console.error(`处理JS文件出错 ${jsPath}:`, error);
@@ -182,7 +257,7 @@ async function processJsFile(jsPath) {
 // 处理HTML文件中的CSS和JS引用
 async function processHtmlFile(htmlPath) {
   try {
-    // 检查缓存
+    // 检查内存缓存（只使用内存缓存，不从磁盘加载）
     if (processedHtmlCache.has(htmlPath)) {
       return processedHtmlCache.get(htmlPath);
     }
@@ -318,6 +393,12 @@ async function processHtmlFile(htmlPath) {
           } else if (minified.code !== undefined) {
             jsContent = minified.code;
             console.log(`已使用terser压缩JS文件: ${jsFilePath}`);
+            // 构建完整路径
+            const jsFullPath = jsFilePath.startsWith('.')
+              ? path.resolve(htmlDir, jsFilePath)
+              : path.resolve(htmlDir, 'assets', jsFilePath);
+            // 保存压缩后的JS作为中间产物
+            saveIntermediateFile(jsFullPath, 'minified_js', jsContent);
           }
         } catch (minifyError) {
           console.warn(`JS压缩过程出错，使用原始内容: ${jsFilePath}`, minifyError);
@@ -364,8 +445,10 @@ async function processHtmlFile(htmlPath) {
       console.warn(`HTML压缩失败，使用原始内容: ${htmlPath}`, htmlMinifyError);
     }
 
-    // 缓存处理后的内容
+    // 缓存处理后的HTML内容到内存
     processedHtmlCache.set(htmlPath, htmlContent);
+    // 保存中间产物到磁盘
+    saveIntermediateFile(htmlPath, 'html', htmlContent);
     return htmlContent;
   } catch (error) {
     console.error(`处理HTML文件出错 ${htmlPath}:`, error);
@@ -444,6 +527,15 @@ const mainConfig = {
           const workerPath = path.resolve('dist', 'worker.js');
           const workerContent = fs.readFileSync(workerPath, 'utf8');
 
+          // 保存二次压缩前的worker.js内容
+          const preCompressPath = path.join(cacheDir, 'worker', 'worker.js');
+          // 确保worker子目录存在
+          if (!fs.existsSync(path.join(cacheDir, 'worker'))) {
+            fs.mkdirSync(path.join(cacheDir, 'worker'), { recursive: true });
+          }
+          fs.writeFileSync(preCompressPath, workerContent);
+          console.log(`已保存二次压缩前的worker.js: ${preCompressPath} (${fs.statSync(preCompressPath).size} 字节)`);
+
           // 使用terser进行最大程度压缩，不保留任何变量名
           const result = await terser.minify(workerContent, {
             mangle: {
@@ -476,15 +568,18 @@ const mainConfig = {
               unsafe_undefined: true
             },
             format: {
-              comments: false,
-              ascii_only: true,
-              wrap_func_args: false
+              comments: false
             }
           });
 
           if (result.error) {
             console.error('terser额外压缩失败:', result.error);
           } else {
+            // 保存二次压缩后的worker.js内容
+            const postCompressPath = path.join(cacheDir, 'worker', 'worker.min.js');
+            fs.writeFileSync(postCompressPath, result.code);
+            console.log(`已保存二次压缩后的worker.js: ${postCompressPath} (${fs.statSync(postCompressPath).size} 字节)`);
+
             // 写回压缩后的内容
             fs.writeFileSync(workerPath, result.code);
             console.log('worker.js额外压缩完成');
