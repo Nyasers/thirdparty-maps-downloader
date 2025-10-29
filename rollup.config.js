@@ -9,8 +9,9 @@ import * as htmlMinifierTerser from 'html-minifier-terser';
 import * as crypto from 'crypto';
 
 // 生成内容的哈希值，用于资源命名
+// 使用base64url编码生成更短的哈希值，比hex编码更紧凑
 function generateHash(content) {
-  return crypto.createHash('md5').update(content).digest('hex');
+  return crypto.createHash('MD5').update(content).digest('base64url');
 }
 
 // 映射表，存储原始路径到哈希路径的映射
