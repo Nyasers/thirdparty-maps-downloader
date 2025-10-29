@@ -30,23 +30,23 @@ export function getHtmlShell(params) {
         inlineSizeText,
         actionButton,
         diagnosticBlock,
-        finalRedirectUrl = '' // 添加finalRedirectUrl参数，用于JavaScript替换
+        finalRedirectUrl
     } = params;
 
-    // 使用对象键值对方式定义所有占位符
+    // 直接使用变量名作为占位符键，减少额外空间占用
     const placeholders = {
-        MAP_GROUP: mapGroup,
-        MISSION_DISPLAY_TITLE: missionDisplayTitle,
-        STATUS_TEXT: statusText,
-        THEME_COLOR: themeColor,
-        CARD_COLOR: cardColor,
-        TEXT_COLOR: textColor,
-        ICON: icon,
-        FILE_NAME: fileName,
-        INLINE_SIZE_TEXT: inlineSizeText,
-        ACTION_BUTTON: actionButton,
-        DIAGNOSTIC_BLOCK: diagnosticBlock,
-        finalRedirectUrl: finalRedirectUrl // 添加finalRedirectUrl到占位符中
+        mapGroup,
+        missionDisplayTitle,
+        statusText,
+        themeColor,
+        cardColor,
+        textColor,
+        icon,
+        fileName,
+        inlineSizeText,
+        actionButton,
+        diagnosticBlock,
+        finalRedirectUrl
     };
 
     // 使用通用的占位符替换函数
@@ -97,7 +97,7 @@ export function assembleTemplateData(data) {
  */
 function getSearchShell(mapGroupOptions) {
     // 使用通用的占位符替换函数
-    return replaceTemplatePlaceholders(searchShellTemplate, { MAP_GROUP_OPTIONS: mapGroupOptions }).trim();
+    return replaceTemplatePlaceholders(searchShellTemplate, { mapGroupOptions }).trim();
 }
 
 /**
