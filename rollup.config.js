@@ -7,6 +7,8 @@ import * as csso from 'csso';
 import * as terser from 'terser';
 import * as htmlMinifierTerser from 'html-minifier-terser';
 import * as crypto from 'crypto';
+import * as https from 'https';
+import * as http from 'http';
 
 // 生成内容的哈希值，用于资源命名
 // 使用base64url编码生成更短的哈希值，比hex编码更紧凑
@@ -16,9 +18,11 @@ function generateHash(content) {
 
 // 映射表，存储原始路径到哈希路径的映射
 const originalToHashedPathMap = new Map();
+// 存储外部资源URL到哈希路径的映射
+const externalResourceMap = new Map();
 
 // 生成哈希化的资源路径
-function generateHashedAssetPath(originalPath, content, extension) {
+function generateHashedAssetPath(originalPath, content) {
   // 检查是否已经为这个原始路径生成过哈希路径
   if (originalToHashedPathMap.has(originalPath)) {
     return originalToHashedPathMap.get(originalPath);
@@ -33,6 +37,61 @@ function generateHashedAssetPath(originalPath, content, extension) {
   originalToHashedPathMap.set(originalPath, hashedPath);
 
   return hashedPath;
+}
+
+// 下载外部资源
+async function downloadExternalResource(url) {
+  console.log(`🔄 开始下载外部资源: ${url}`);
+
+  // 如果已经缓存过，直接返回
+  if (externalResourceMap.has(url)) {
+    console.log(`✅ 外部资源已缓存: ${url}`);
+    return externalResourceMap.get(url);
+  }
+
+  return new Promise((resolve, reject) => {
+    const protocol = url.startsWith('https') ? https : http;
+    console.log(`🌐 使用协议: ${protocol === https ? 'HTTPS' : 'HTTP'}`);
+
+    protocol.get(url, (res) => {
+      console.log(`📡 收到响应，状态码: ${res.statusCode}`);
+
+      if (res.statusCode !== 200) {
+        console.warn(`❌ 下载失败，状态码: ${res.statusCode}，保留原始URL`);
+        // 按照要求，下载失败时保留原始URL
+        const fallbackEntry = { path: url, content: '', type: 'text/plain' };
+        externalResourceMap.set(url, fallbackEntry);
+        resolve(fallbackEntry);
+        return;
+      }
+
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => {
+        const content = Buffer.concat(chunks).toString('utf8');
+        const contentType = res.headers['content-type'] || 'text/plain';
+
+        console.log(`📥 下载完成，内容大小: ${content.length} 字节，内容类型: ${contentType}`);
+
+        // 生成哈希路径
+        const hashedPath = generateHashedAssetPath(`external_${url}`, content, '');
+
+        // 存储外部资源映射
+        const resourceEntry = { path: hashedPath, content, type: contentType };
+        externalResourceMap.set(url, resourceEntry);
+
+        console.log(`✅ 外部资源下载成功并映射: ${url} -> ${hashedPath}`);
+        resolve(resourceEntry);
+      });
+    }).on('error', (err) => {
+      console.error(`❌ 下载外部资源出错: ${url}`, err.message);
+      // 按照要求，下载出错时保留原始URL
+      const fallbackEntry = { path: url, content: '', type: 'text/plain' };
+      externalResourceMap.set(url, fallbackEntry);
+      console.warn(`⚠️  下载出错，保留原始URL: ${url}`);
+      resolve(fallbackEntry);
+    });
+  });
 }
 
 // 缓存目录路径
@@ -279,56 +338,137 @@ async function processHtmlFile(htmlPath) {
     let htmlContent = fs.readFileSync(htmlPath, 'utf-8');
     const htmlDir = path.dirname(htmlPath);
 
-    // 1. 处理CSS文件 - 简化处理，移除tailwindcss特殊处理
-    htmlContent = htmlContent.replace(/<link\s+rel="stylesheet"\s+href="(?!https:\/\/)(\.?\/?[^"]+)"\s*\/?>/g, (match, cssFilePath) => {
-      try {
-        const cssFullPath = cssFilePath.startsWith('.')
-          ? path.resolve(htmlDir, cssFilePath)
-          : path.resolve(htmlDir, 'assets', cssFilePath);
+    // 1. 处理CSS文件 - 包括内部和外部CSS
+    htmlContent = await (async () => {
+      let result = htmlContent;
 
-        if (fs.existsSync(cssFullPath)) {
-          // 使用简化的CSS处理函数，获取处理结果（包含导入的CSS路径）
-          const cssResult = processCssFile(cssFullPath);
-          const cssContent = cssResult.content;
+      // 处理外部CSS链接
+      // 先匹配包含rel="stylesheet"的link标签，再从中提取href属性
+      const externalCssRegex = /<link\s+[^>]*?rel=(?:"|')stylesheet(?:"|')[^>]*?\/?>/gs;
+      const externalCssMatches = [...result.matchAll(externalCssRegex)];
+      console.log(`🔍 找到 ${externalCssMatches.length} 个外部CSS链接`);
 
-          // 使用哈希路径替代原始路径
-          const hashedAssetPath = generateHashedAssetPath(cssFullPath, cssContent, 'css');
+      for (const match of externalCssMatches) {
+        try {
+          // 从整个匹配的标签中提取href属性值（支持单引号和双引号）
+          const hrefMatch = match[0].match(/href=(?:"|')(https?:\/\/[^"\']+)(?:"|')/);
+          if (!hrefMatch) continue;
 
-          // 将处理后的CSS内容添加到资源映射中
-          assetMap.set(hashedAssetPath, createAssetEntry(cssContent, 'text/css'));
+          const externalUrl = hrefMatch[1];
+          console.log(`📄 处理外部CSS链接: ${externalUrl}`);
+          // 下载外部资源
+          const resource = await downloadExternalResource(externalUrl);
 
-          console.log(`已处理CSS文件并映射到哈希路径: ${hashedAssetPath}`);
-
-          // 创建导入的CSS文件的link标签
-          let importLinks = '';
-          if (typeof cssResult === 'object' && cssResult.importedPaths) {
-            for (const importedPath of cssResult.importedPaths) {
-              importLinks += `<link rel="stylesheet" href="${importedPath}" />
-`;
-              console.log(`已为导入的CSS添加link标签: ${importedPath}`);
-            }
+          if (resource.path !== externalUrl) { // 下载成功，使用本地路径
+            // 将外部资源添加到assetMap
+            assetMap.set(resource.path, createAssetEntry(resource.content, resource.type));
+            // 简化处理：只保留必要的rel和新的href属性，不再保存其他原始属性
+            result = result.replace(match[0], `<link rel="stylesheet" href="${resource.path}" />`);
+            console.log(`✅ 已替换外部CSS链接: ${externalUrl} -> ${resource.path}`);
+          } else {
+            // 下载失败，保留原始链接
+            console.log(`⚠️  保留原始CSS链接: ${externalUrl}`);
           }
-
-          // 返回使用哈希路径的link标签，以及所有导入的CSS的link标签
-          return importLinks + `<link rel="stylesheet" href="${hashedAssetPath}" />`;
+        } catch (error) {
+          console.error(`❌ 处理外部CSS失败: ${match[1]}`, error.message);
+          // 保留原始链接作为后备
         }
-        console.warn(`CSS文件未找到: ${cssFullPath}`);
-        return match;
-      } catch (error) {
-        console.error(`处理CSS文件出错 ${cssFilePath}:`, error);
-        return match;
       }
-    });
+
+      // 处理内部CSS文件
+      result = result.replace(/<link\s+rel="stylesheet"\s+href="(?!https:\/\/)(\.?\/?[^"]+)"\s*\/?>/g, (match, cssFilePath) => {
+        try {
+          const cssFullPath = cssFilePath.startsWith('.')
+            ? path.resolve(htmlDir, cssFilePath)
+            : path.resolve(htmlDir, 'assets', cssFilePath);
+
+          if (fs.existsSync(cssFullPath)) {
+            // 使用简化的CSS处理函数，获取处理结果（包含导入的CSS路径）
+            const cssResult = processCssFile(cssFullPath);
+            const cssContent = cssResult.content;
+
+            // 使用哈希路径替代原始路径
+            const hashedAssetPath = generateHashedAssetPath(cssFullPath, cssContent, 'css');
+
+            // 将处理后的CSS内容添加到资源映射中
+            assetMap.set(hashedAssetPath, createAssetEntry(cssContent, 'text/css'));
+
+            console.log(`已处理CSS文件并映射到哈希路径: ${hashedAssetPath}`);
+
+            // 创建导入的CSS文件的link标签
+            let importLinks = '';
+            if (typeof cssResult === 'object' && cssResult.importedPaths) {
+              for (const importedPath of cssResult.importedPaths) {
+                importLinks += `<link rel="stylesheet" href="${importedPath}" />
+`;
+                console.log(`已为导入的CSS添加link标签: ${importedPath}`);
+              }
+            }
+
+            // 返回使用哈希路径的link标签，以及所有导入的CSS的link标签
+            return importLinks + `<link rel="stylesheet" href="${hashedAssetPath}" />`;
+          }
+          console.warn(`CSS文件未找到: ${cssFullPath}`);
+          return match;
+        } catch (error) {
+          console.error(`处理CSS文件出错 ${cssFilePath}:`, error);
+          return match;
+        }
+      });
+
+      return result;
+    })();
 
     // 2. 处理JS文件
-    // 2.1 先找到所有module类型的JS引用（使用rollup处理）
+    // 2.1 先处理外部JS链接
+    htmlContent = await (async () => {
+      let result = htmlContent;
+
+      // 处理外部JS链接（包括module和普通脚本）
+      // 修改为支持多行的正则表达式，允许属性顺序不固定，支持单引号和双引号
+      const externalJsRegex = /<script\s+[^>]*?src=(?:"|')(https?:\/\/[^"\']+)(?:"|')[^>]*><\/script>/gs;
+      const externalJsMatches = [...result.matchAll(externalJsRegex)];
+      console.log(`🔍 找到 ${externalJsMatches.length} 个外部JS链接`);
+
+      for (const match of externalJsMatches) {
+        try {
+          // 从整个匹配的标签中提取src属性值（支持单引号和双引号）
+          const srcMatch = match[0].match(/src=(?:"|')(https?:\/\/[^"\']+)(?:"|')/);
+          if (!srcMatch) continue;
+
+          const externalUrl = srcMatch[1];
+          console.log(`📄 处理外部JS链接: ${externalUrl}`);
+          // 下载外部资源
+          const resource = await downloadExternalResource(externalUrl);
+
+          if (resource.path !== externalUrl) { // 下载成功，使用本地路径
+            // 将外部资源添加到assetMap
+            assetMap.set(resource.path, createAssetEntry(resource.content, resource.type));
+
+            // 简化处理：只保留必要的src属性，不再保存其他原始属性
+            result = result.replace(match[0], `<script src="${resource.path}"></script>`);
+            console.log(`✅ 已替换外部JS链接: ${externalUrl} -> ${resource.path}`);
+          } else {
+            // 下载失败，保留原始链接
+            console.log(`⚠️  保留原始JS链接: ${externalUrl}`);
+          }
+        } catch (error) {
+          console.error(`❌ 处理外部JS失败: ${match[1]}`, error.message);
+          // 保留原始链接作为后备
+        }
+      }
+
+      return result;
+    })();
+
+    // 2.2 找到所有内部module类型的JS引用（使用rollup处理）
     const moduleJsMatches = [];
     htmlContent.replace(/<script\s+type="module"\s+src="(?!https:\/\/)([^"]+)"\s*\/?><\/script>/g, (match, jsFilePath) => {
       moduleJsMatches.push({ match, jsFilePath });
       return match;
     });
 
-    // 2.2 找到所有普通JS引用（后续统一压缩）
+    // 2.3 找到所有内部普通JS引用（后续统一压缩）
     const regularJsMatches = [];
     htmlContent.replace(/<script\s+(?!type="module")[^>]*src="(?!https:\/\/)([^"]+)"\s*\/?><\/script>/g, (match, jsFilePath) => {
       regularJsMatches.push({ match, jsFilePath });
@@ -436,6 +576,69 @@ async function processHtmlFile(htmlPath) {
         // 出错时保留原始引用
       }
     }
+
+    // 3. 处理其他外部资源（如字体、图片等）
+    htmlContent = await (async () => {
+      let result = htmlContent;
+
+      // 处理CSS中的外部字体和图片URL
+      const cssUrlRegex = /url\(\s*(?:"|')?(https?:\/\/[^"')]+)(?:"|')?\s*\)/g;
+      const cssUrlMatches = [...result.matchAll(cssUrlRegex)];
+      console.log(`🔍 找到 ${cssUrlMatches.length} 个CSS外部URL引用`);
+
+      for (const match of cssUrlMatches) {
+        try {
+          const externalUrl = match[1];
+          console.log(`🎨 处理CSS中的外部URL: ${externalUrl}`);
+          // 下载外部资源
+          const resource = await downloadExternalResource(externalUrl);
+
+          if (resource.path !== externalUrl) { // 下载成功，使用本地路径
+            // 将外部资源添加到assetMap
+            assetMap.set(resource.path, createAssetEntry(resource.content, resource.type));
+            // 替换URL
+            result = result.replace(match[0], `url(${resource.path})`);
+            console.log(`✅ 已替换CSS外部URL: ${externalUrl} -> ${resource.path}`);
+          } else {
+            // 下载失败，保留原始URL
+            console.log(`⚠️  保留原始CSS外部URL: ${externalUrl}`);
+          }
+        } catch (error) {
+          console.error(`❌ 处理CSS外部URL失败: ${match[1]}`, error.message);
+          // 保留原始URL作为后备
+        }
+      }
+
+      // 处理HTML中的外部图片
+      const imgSrcRegex = /<img\s+[^>]*src="(https?:\/\/[^"\']+)"\s*[^>]*>/g;
+      const imgMatches = [...result.matchAll(imgSrcRegex)];
+      console.log(`🔍 找到 ${imgMatches.length} 个外部图片链接`);
+
+      for (const match of imgMatches) {
+        try {
+          const externalUrl = match[1];
+          console.log(`🖼️  处理外部图片链接: ${externalUrl}`);
+          // 下载外部资源
+          const resource = await downloadExternalResource(externalUrl);
+
+          if (resource.path !== externalUrl) { // 下载成功，使用本地路径
+            // 将外部资源添加到assetMap
+            assetMap.set(resource.path, createAssetEntry(resource.content, resource.type));
+            // 替换src属性
+            result = result.replace(match[0], match[0].replace(externalUrl, resource.path));
+            console.log(`✅ 已替换外部图片链接: ${externalUrl} -> ${resource.path}`);
+          } else {
+            // 下载失败，保留原始URL
+            console.log(`⚠️  保留原始图片链接: ${externalUrl}`);
+          }
+        } catch (error) {
+          console.error(`❌ 处理外部图片失败: ${match[1]}`, error.message);
+          // 保留原始URL作为后备
+        }
+      }
+
+      return result;
+    })();
 
     // 使用html-minifier-terser进行专业HTML压缩
     try {
