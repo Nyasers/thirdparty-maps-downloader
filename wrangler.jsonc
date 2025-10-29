@@ -1,5 +1,8 @@
 {
   "name": "thirdparty-maps-downloader",
   "compatibility_date": "2025-10-24",
-  "main": "./dist/worker.min.js"
+  "main": "./dist/worker.min.js",
+  "placement": {
+    "mode": "smart"
+  }
 }
