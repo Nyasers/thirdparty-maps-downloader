@@ -543,20 +543,15 @@ const mainConfig = {
           const preCompressPath = path.join(distDir, 'worker.js');
           console.log(`二次压缩前的worker.js: ${preCompressPath} (${fs.statSync(preCompressPath).size} 字节)`);
 
-          // 使用terser进行最大程度压缩，优化压缩配置以获得更好的压缩效果
+          // 使用terser进行安全压缩，避免过度优化导致的功能问题
           const result = await terser.minify(workerContent, {
             mangle: {
               toplevel: true,
               eval: true,
-              keep_fnames: false,
-              // 添加属性压缩，进一步减小文件体积
-              properties: {
-                keep_quoted: false,
-                reserved: []
-              }
+              keep_fnames: false
             },
             compress: {
-              // 增加压缩次数以获得更好效果
+              // 标准压缩次数
               passes: 2,
               // 启用更激进的压缩选项
               pure_getters: true,
@@ -571,16 +566,11 @@ const mainConfig = {
               if_return: true,
               join_vars: true,
               reduce_vars: true,
-              // 移除更多未使用的代码
               hoist_funs: true,
               hoist_vars: true,
-              // 优化循环结构
               loops: true,
-              // 合并变量声明
               collapse_vars: true,
-              // 内联简单函数
               inline: true,
-              // 移除更多console函数
               pure_funcs: ['console.log', 'console.debug', 'console.info', 'console.warn', 'console.error'],
               // 不安全优化选项
               unsafe: true,
@@ -595,7 +585,6 @@ const mainConfig = {
             },
             format: {
               comments: false,
-              // 优化输出格式
               beautify: false,
               // 使用更紧凑的语法
               braces: false,
@@ -630,25 +619,6 @@ function assetMapReplacementPlugin() {
     generateBundle(options, bundle) {
       console.log('generateBundle钩子执行，开始替换资源映射');
       console.log('最终资源映射数量:', assetMap.size);
-
-      // 生成最终的资源映射对象字符串
-      function generateAssetMapping(assetMap) {
-        return '{' + Array.from(assetMap.entries()).map(([path, entry]) => {
-          // 确保处理新格式的条目
-          if (entry && typeof entry === 'object' && 'content' in entry && 'type' in entry) {
-            return `"${path}": { "content": "${escapeJsString(entry.content)}", "type": "${entry.type}" }`;
-          } else {
-            // 向后兼容，处理旧格式的字符串内容
-            let contentType = 'text/plain';
-            if (path.includes('/assets/import/tailwindcss') || path.endsWith('.css')) {
-              contentType = 'text/css';
-            } else if (path.endsWith('.js')) {
-              contentType = 'application/javascript';
-            }
-            return `"${path}": { "content": "${escapeJsString(entry)}", "type": "${contentType}" }`;
-          }
-        }).join(', ') + '}';
-      }
 
       // 获取最终的资源映射内容
       const finalAssets = Object.fromEntries(assetMap);
