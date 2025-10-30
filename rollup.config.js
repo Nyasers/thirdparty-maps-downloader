@@ -14,6 +14,7 @@ import * as http from 'http';
 const terserOptions = {
   mangle: {
     toplevel: true,
+    module: true,
     eval: true,
     keep_fnames: false,
     // 添加额外的变量名混淆选项
@@ -32,21 +33,30 @@ const terserOptions = {
     dead_code: true,
     conditionals: true,
     booleans: true,
+    booleans_as_integers: true,
     unused: true,
     if_return: true,
     join_vars: true,
     reduce_vars: true,
     hoist_funs: true,
+    hoist_props: true,
     hoist_vars: true,
     loops: true,
     collapse_vars: true,
     pure_funcs: ['console.log', 'console.debug', 'console.info', 'console.warn', 'console.error'],
     // 调整内联策略
-    inline: 3, // 更激进的内联策略（1-3）
+    inline: true, // 更激进的内联策略
     // 移除可能导致问题的不安全选项，保留有效的优化
     unsafe: false,
     unsafe_arrows: true, // 相对安全的优化
+    unsafe_comps: true, // 相对安全的比较优化
+    unsafe_Function: true, // 相对安全的函数优化
     unsafe_math: true, // 相对安全的数学优化
+    unsafe_symbols: true, // 相对安全的符号优化
+    unsafe_methods: true, // 相对安全的方法优化
+    unsafe_proto: true, // 相对安全的原型优化
+    unsafe_regexp: true, // 相对安全的正则表达式优化
+    unsafe_undefined: true, // 相对安全的undefined优化
     // 添加terser 5.x支持的压缩选项
     sequences: true,
     typeofs: true,
@@ -67,12 +77,13 @@ const terserOptions = {
     braces: false,
     semicolons: false,
     // 添加terser 5.x支持的格式选项
-    indent_level: 0,
+    indent_level: 4,
     ascii_only: false,
-    wrap_iife: false
+    wrap_iife: false,
+    quote_style: 0
   },
   // 启用ECMAScript特性但指定具体版本以提高兼容性
-  ecma: 2020,
+  ecma: 2025,
   // 启用源映射选项（如果需要调试）
   sourceMap: false
 };
@@ -92,8 +103,9 @@ let importedCssMap = new Map();
 // 存储已处理的导入CSS文件路径，避免重复处理
 let processedImportedCss = new Set();
 
-// 生成哈希化的资源路径
-function generateHashedAssetPath(originalPath, content) {
+// 生成哈希化的资源路径，并添加适当的文件后缀
+// 根据要求：外部资源根据MIME type确定后缀，内部资源直接使用原后缀
+function generateHashedAssetPath(originalPath, content, options = {}) {
   // 检查是否已经为这个原始路径生成过哈希路径
   if (originalToHashedPathMap.has(originalPath)) {
     return originalToHashedPathMap.get(originalPath);
@@ -101,13 +113,62 @@ function generateHashedAssetPath(originalPath, content) {
 
   // 生成哈希值
   const hash = generateHash(content);
-  // 创建新的哈希路径，不需要扩展名，通过HTTP头指定内容类型
-  const hashedPath = `/assets/${hash}`;
+
+  // 获取MIME类型（如果提供）
+  const mimeType = options.mimeType || '';
+
+  // 获取isExternal标志（如果提供）
+  const isExternal = options.isExternal ?? (typeof originalPath === 'string' && originalPath.startsWith('http'));
+
+  let extension = '';
+
+  if (!isExternal) {
+    // 内部资源：直接使用原始文件的扩展名
+    extension = path.extname(originalPath);
+    console.log(`内部资源使用原始扩展名: ${originalPath} -> ${extension}`);
+  } else if (mimeType) {
+    // 外部资源：根据MIME类型确定扩展名
+    extension = getExtensionFromMimeType(mimeType);
+    console.log(`外部资源根据MIME类型确定扩展名: ${mimeType} -> ${extension}`);
+  } else if (typeof originalPath === 'string') {
+    // 外部资源但没有MIME类型：回退到基于URL的扩展名判断
+    extension = path.extname(originalPath);
+    console.log(`外部资源使用URL扩展名: ${originalPath} -> ${extension}`);
+  }
+
+  // 创建新的哈希路径，添加扩展名以确保正确的MIME类型
+  const hashedPath = `/assets/${hash}${extension}`;
 
   // 存储映射关系
   originalToHashedPathMap.set(originalPath, hashedPath);
 
   return hashedPath;
+}
+
+// 根据MIME类型获取对应的文件扩展名
+function getExtensionFromMimeType(mimeType) {
+  const mimeToExt = {
+    'text/javascript': '.js',
+    'application/javascript': '.js',
+    'application/x-javascript': '.js',
+    'text/css': '.css',
+    'text/html': '.html',
+    'image/png': '.png',
+    'image/jpeg': '.jpg',
+    'image/gif': '.gif',
+    'image/svg+xml': '.svg',
+    'font/woff': '.woff',
+    'font/woff2': '.woff2',
+    'font/ttf': '.ttf',
+    'font/otf': '.otf',
+    'application/json': '.json',
+    'text/plain': '.txt'
+  };
+
+  // 处理可能包含字符集的MIME类型，如 'text/html; charset=utf-8'
+  const baseMimeType = mimeType.split(';')[0].trim();
+
+  return mimeToExt[baseMimeType] || '';
 }
 
 // 下载外部资源，支持重定向
@@ -734,12 +795,17 @@ async function processHtmlFile(htmlPath) {
             // 压缩后统一生成哈希路径
             let hashedPath;
             if (resource.isExternal) {
-              // 对于外部资源，使用压缩后的内容生成哈希路径
-              hashedPath = generateHashedAssetPath(resource.url, processedContent);
+              // 对于外部资源，使用压缩后的内容生成哈希路径，并传递MIME类型
+              hashedPath = generateHashedAssetPath(resource.url, processedContent, {
+                mimeType: resource.resourceType,
+                isExternal: resource.isExternal
+              });
               console.log(`🔄 基于压缩后内容生成外部资源哈希路径: ${hashedPath}`);
             } else {
               // 对于内部资源，使用文件路径和压缩后的内容生成哈希路径
-              hashedPath = generateHashedAssetPath(resource.filePath, processedContent);
+              hashedPath = generateHashedAssetPath(resource.filePath, processedContent, {
+                isExternal: resource.isExternal
+              });
               console.log(`🔄 基于压缩后内容生成内部资源哈希路径: ${hashedPath}`);
             }
 
@@ -769,8 +835,10 @@ async function processHtmlFile(htmlPath) {
             // 压缩后统一生成哈希路径
             let hashedPath;
             if (resource.isExternal) {
-              // 对于外部资源，使用压缩后的内容生成哈希路径
-              hashedPath = generateHashedAssetPath(resource.url, processedContent);
+              // 对于外部资源，使用压缩后的内容生成哈希路径，并传递MIME类型
+              hashedPath = generateHashedAssetPath(resource.url, processedContent, {
+                mimeType: resource.resourceType
+              });
               console.log(`🔄 基于压缩后内容生成外部资源哈希路径: ${hashedPath}`);
             } else {
               // 对于内部资源，使用文件路径和压缩后的内容生成哈希路径
@@ -806,7 +874,9 @@ async function processHtmlFile(htmlPath) {
                   }
 
                   // 生成哈希路径
-                  const importHashedPath = generateHashedAssetPath(importPath, minifiedImport);
+                  const importHashedPath = generateHashedAssetPath(importPath, minifiedImport, {
+                    isExternal: resource.isExternal
+                  });
                   assetMap.set(importHashedPath, createAssetEntry(minifiedImport, 'text/css'));
 
                   // 添加link标签
@@ -847,11 +917,16 @@ async function processHtmlFile(htmlPath) {
           const resource = await downloadExternalResource(externalUrl);
 
           if (resource.path !== externalUrl) { // 下载成功，使用本地路径
+            // 生成哈希路径，并传递MIME类型
+            const hashedPath = generateHashedAssetPath(externalUrl, resource.content, {
+              mimeType: resource.type,
+              isExternal: true
+            });
             // 将外部资源添加到assetMap
-            assetMap.set(resource.path, createAssetEntry(resource.content, resource.type));
+            assetMap.set(hashedPath, createAssetEntry(resource.content, resource.type));
             // 替换URL
-            result = result.replace(match[0], `url(${resource.path})`);
-            console.log(`✅ 已替换CSS外部URL: ${externalUrl} -> ${resource.path}`);
+            result = result.replace(match[0], `url(${hashedPath})`);
+            console.log(`✅ 已替换CSS外部URL: ${externalUrl} -> ${hashedPath}`);
           } else {
             // 下载失败，保留原始URL
             console.log(`⚠️  保留原始CSS外部URL: ${externalUrl}`);
@@ -875,11 +950,16 @@ async function processHtmlFile(htmlPath) {
           const resource = await downloadExternalResource(externalUrl);
 
           if (resource.path !== externalUrl) { // 下载成功，使用本地路径
+            // 生成哈希路径，并传递MIME类型
+            const hashedPath = generateHashedAssetPath(externalUrl, resource.content, {
+              mimeType: resource.type,
+              isExternal: true
+            });
             // 将外部资源添加到assetMap
-            assetMap.set(resource.path, createAssetEntry(resource.content, resource.type));
+            assetMap.set(hashedPath, createAssetEntry(resource.content, resource.type));
             // 替换src属性
-            result = result.replace(match[0], match[0].replace(externalUrl, resource.path));
-            console.log(`✅ 已替换外部图片链接: ${externalUrl} -> ${resource.path}`);
+            result = result.replace(match[0], match[0].replace(externalUrl, hashedPath));
+            console.log(`✅ 已替换外部图片链接: ${externalUrl} -> ${hashedPath}`);
           } else {
             // 下载失败，保留原始URL
             console.log(`⚠️  保留原始图片链接: ${externalUrl}`);
@@ -953,7 +1033,9 @@ function htmlProcessorPlugin() {
       // 对于CSS文件，确保它们被添加到资源映射中
       if (id.endsWith('.css')) {
         // 使用哈希路径替代原始路径
-        const hashedAssetPath = generateHashedAssetPath(id, code);
+        const hashedAssetPath = generateHashedAssetPath(id, code, {
+          isExternal: false
+        });
 
         // 直接将CSS内容添加到资源映射中
         assetMap.set(hashedAssetPath, createAssetEntry(code, 'text/css'));
@@ -1035,7 +1117,7 @@ function assetFileOutputPlugin() {
 
       // 遍历所有资源并保存为文件
       for (const [assetPath, assetEntry] of assetMap.entries()) {
-        // 从路径中提取文件名 (格式: /assets/hash -> hash)
+        // 从路径中提取文件名 (格式: /assets/hash.ext -> hash.ext)
         const fileName = assetPath.replace(/^\/assets\//, '');
         const filePath = path.join(assetsDir, fileName);
 
