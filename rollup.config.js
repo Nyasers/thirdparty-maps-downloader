@@ -10,6 +10,73 @@ import * as crypto from 'crypto';
 import * as https from 'https';
 import * as http from 'http';
 
+// 共享的Terser压缩配置对象 - 优化版
+const terserOptions = {
+  mangle: {
+    toplevel: true,
+    eval: true,
+    keep_fnames: false,
+    // 添加额外的变量名混淆选项
+    keep_classnames: false,
+    reserved: [] // 可以添加需要保留的变量名
+  },
+  compress: {
+    // 增加压缩次数以获得更好效果
+    passes: 3,
+    // 基础压缩选项
+    pure_getters: true,
+    toplevel: true,
+    module: true,
+    drop_console: true,
+    drop_debugger: true,
+    dead_code: true,
+    conditionals: true,
+    booleans: true,
+    unused: true,
+    if_return: true,
+    join_vars: true,
+    reduce_vars: true,
+    hoist_funs: true,
+    hoist_vars: true,
+    loops: true,
+    collapse_vars: true,
+    pure_funcs: ['console.log', 'console.debug', 'console.info', 'console.warn', 'console.error'],
+    // 调整内联策略
+    inline: 3, // 更激进的内联策略（1-3）
+    // 移除可能导致问题的不安全选项，保留有效的优化
+    unsafe: false,
+    unsafe_arrows: true, // 相对安全的优化
+    unsafe_math: true, // 相对安全的数学优化
+    // 添加terser 5.x支持的压缩选项
+    sequences: true,
+    typeofs: true,
+    comparisons: true,
+    computed_props: true,
+    // 增加额外的有效压缩选项
+    top_retain: false,
+    directives: true,
+    keep_classnames: false,
+    keep_fargs: false,
+    keep_fnames: false,
+    reduce_funcs: true
+  },
+  format: {
+    comments: false,
+    beautify: false,
+    // 使用更紧凑的语法
+    braces: false,
+    semicolons: false,
+    // 添加terser 5.x支持的格式选项
+    indent_level: 0,
+    ascii_only: false,
+    wrap_iife: false
+  },
+  // 启用ECMAScript特性但指定具体版本以提高兼容性
+  ecma: 2020,
+  // 启用源映射选项（如果需要调试）
+  sourceMap: false
+};
+
 // 生成内容的哈希值，用于资源命名
 // 使用base64url编码生成更短的哈希值，比hex编码更紧凑
 function generateHash(content) {
@@ -20,6 +87,10 @@ function generateHash(content) {
 const originalToHashedPathMap = new Map();
 // 存储外部资源URL到哈希路径的映射
 const externalResourceMap = new Map();
+// 存储CSS文件路径到其导入的CSS文件路径数组的映射
+let importedCssMap = new Map();
+// 存储已处理的导入CSS文件路径，避免重复处理
+let processedImportedCss = new Set();
 
 // 生成哈希化的资源路径
 function generateHashedAssetPath(originalPath, content) {
@@ -39,8 +110,8 @@ function generateHashedAssetPath(originalPath, content) {
   return hashedPath;
 }
 
-// 下载外部资源
-async function downloadExternalResource(url) {
+// 下载外部资源，支持重定向
+async function downloadExternalResource(url, maxRedirects = 5) {
   console.log(`🔄 开始下载外部资源: ${url}`);
 
   // 如果已经缓存过，直接返回
@@ -49,16 +120,73 @@ async function downloadExternalResource(url) {
     return externalResourceMap.get(url);
   }
 
-  return new Promise((resolve, reject) => {
+  // 避免无限重定向
+  if (maxRedirects <= 0) {
+    console.warn(`❌ 达到最大重定向次数，无法下载: ${url}`);
+    const fallbackEntry = { path: url, content: '', type: 'text/plain' };
+    externalResourceMap.set(url, fallbackEntry);
+    return fallbackEntry;
+  }
+
+  return new Promise((resolve) => {
     const protocol = url.startsWith('https') ? https : http;
     console.log(`🌐 使用协议: ${protocol === https ? 'HTTPS' : 'HTTP'}`);
 
-    protocol.get(url, (res) => {
+    // 设置请求选项，添加超时
+    const options = {
+      timeout: 30000, // 30秒超时
+    };
+
+    const req = protocol.get(url, options, (res) => {
+      // 设置响应超时
+      res.setTimeout(30000, () => {
+        console.error(`❌ 响应超时: ${url}`);
+        req.destroy(); // 销毁请求
+        const fallbackEntry = { path: url, content: '', type: 'text/plain' };
+        externalResourceMap.set(url, fallbackEntry);
+        resolve(fallbackEntry);
+      });
+
       console.log(`📡 收到响应，状态码: ${res.statusCode}`);
 
+      // 处理重定向 (3xx 状态码)
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        let redirectUrl = res.headers.location;
+        console.log(`🔄 重定向到: ${redirectUrl}`);
+
+        // 处理相对URL重定向
+        if (redirectUrl.startsWith('/')) {
+          // 从原始URL中提取域名和协议
+          const urlObj = new URL(url);
+          redirectUrl = `${urlObj.protocol}//${urlObj.host}${redirectUrl}`;
+          console.log(`🔄 转换相对URL为绝对URL: ${redirectUrl}`);
+        }
+
+        // 确保当前响应被消耗，避免内存泄漏
+        res.resume();
+
+        // 递归调用以下载重定向后的资源
+        downloadExternalResource(redirectUrl, maxRedirects - 1)
+          .then(redirectedResource => {
+            // 同时缓存原始URL的映射到重定向后的资源
+            externalResourceMap.set(url, redirectedResource);
+            resolve(redirectedResource);
+          })
+          .catch(error => {
+            // 处理重定向过程中的错误
+            console.error(`❌ 重定向资源下载失败: ${redirectUrl}`, error.message);
+            const fallbackEntry = { path: url, content: '', type: 'text/plain' };
+            externalResourceMap.set(url, fallbackEntry);
+            resolve(fallbackEntry);
+          });
+        return;
+      }
+
+      // 非200状态码且非重定向，视为失败
       if (res.statusCode !== 200) {
         console.warn(`❌ 下载失败，状态码: ${res.statusCode}，保留原始URL`);
-        // 按照要求，下载失败时保留原始URL
+        // 确保响应被消耗
+        res.resume();
         const fallbackEntry = { path: url, content: '', type: 'text/plain' };
         externalResourceMap.set(url, fallbackEntry);
         resolve(fallbackEntry);
@@ -73,17 +201,29 @@ async function downloadExternalResource(url) {
 
         console.log(`📥 下载完成，内容大小: ${content.length} 字节，内容类型: ${contentType}`);
 
-        // 生成哈希路径
-        const hashedPath = generateHashedAssetPath(`external_${url}`, content, '');
-
-        // 存储外部资源映射
-        const resourceEntry = { path: hashedPath, content, type: contentType };
+        // 暂不生成哈希路径，等待压缩后再生成
+        // 存储外部资源映射，使用原始URL作为路径
+        const resourceEntry = { path: url, content, type: contentType };
         externalResourceMap.set(url, resourceEntry);
 
-        console.log(`✅ 外部资源下载成功并映射: ${url} -> ${hashedPath}`);
+        // 保存中间产物的逻辑已移动到统一处理阶段
+
+        console.log(`✅ 外部资源下载成功: ${url}`);
         resolve(resourceEntry);
       });
-    }).on('error', (err) => {
+    });
+
+    // 设置请求超时
+    req.on('timeout', () => {
+      console.error(`❌ 请求超时: ${url}`);
+      req.destroy(); // 销毁请求
+      const fallbackEntry = { path: url, content: '', type: 'text/plain' };
+      externalResourceMap.set(url, fallbackEntry);
+      resolve(fallbackEntry);
+    });
+
+    // 错误处理
+    req.on('error', (err) => {
       console.error(`❌ 下载外部资源出错: ${url}`, err.message);
       // 按照要求，下载出错时保留原始URL
       const fallbackEntry = { path: url, content: '', type: 'text/plain' };
@@ -219,52 +359,39 @@ function processCssFile(cssPath) {
     while ((match = importRegex.exec(originalContent)) !== null) {
       const importPath = match[1];
 
-      // 对于相对路径文件导入，递归处理
+      // 对于相对路径文件导入，收集导入的CSS文件路径
       if (importPath.startsWith('./') || importPath.includes('/')) {
         const importFullPath = path.resolve(cssDir, importPath);
         if (fs.existsSync(importFullPath)) {
-          console.log(`处理导入的CSS文件: ${importFullPath}`);
-          const importedResult = processCssFile(importFullPath);
-          const importedCssContent = importedResult.content;
+          console.log(`找到导入的CSS文件: ${importFullPath}`);
 
-          // 为导入的CSS文件创建独立的资源映射，使用哈希路径
-          const hashedAssetPath = generateHashedAssetPath(importFullPath, importedCssContent, 'css');
+          // 将导入的CSS文件路径添加到导入路径数组
+          importedCssPaths.push(importFullPath);
 
-          if (!assetMap.has(hashedAssetPath)) {
-            assetMap.set(hashedAssetPath, createAssetEntry(importedCssContent, 'text/css'));
-            console.log(`已为导入的CSS文件创建哈希映射: ${hashedAssetPath}`);
-          }
-
-          // 保存导入的CSS文件的哈希路径
-          importedCssPaths.push(hashedAssetPath);
-
-          // 合并所有嵌套导入的路径
-          if (typeof importedResult === 'object' && importedResult.importedPaths) {
-            importedCssPaths.push(...importedResult.importedPaths);
+          // 递归处理嵌套导入
+          const nestedResult = processCssFile(importFullPath);
+          if (typeof nestedResult === 'object' && nestedResult.importedPaths) {
+            importedCssPaths.push(...nestedResult.importedPaths);
           }
         }
       }
     }
 
     // 处理CSS内容：移除import语句，保留自定义CSS
-    let cssContent = originalContent.replace(importRegex, '');
-
-    // 使用csso压缩CSS内容
-    console.log(`使用csso压缩CSS文件: ${cssPath}`);
-    const minifiedCss = csso.minify(cssContent).css;
+    let cssContent = originalContent.replace(importRegex, '').trim();
 
     // 创建返回对象，包含压缩后的CSS内容和导入的CSS路径
     const result = {
-      content: minifiedCss,
+      content: cssContent,
       importedPaths: importedCssPaths
     };
 
+    // 存储CSS文件路径到其导入的CSS文件路径数组的映射
+    importedCssMap.set(cssPath, importedCssPaths);
+
     // 缓存处理后的内容到内存
     processedCssCache.set(cssPath, result);
-    // 保存原始CSS内容（移除import后的内容）到磁盘
-    saveIntermediateFile(cssPath, 'css', cssContent);
-    // 保存压缩后的CSS内容
-    saveIntermediateFile(cssPath, 'minified_css', result.content);
+    // 保存中间产物的逻辑已移动到统一处理阶段
     return result;
   } catch (error) {
     console.error(`处理CSS文件出错 ${cssPath}:`, error);
@@ -310,8 +437,7 @@ async function processJsFile(jsPath) {
 
     // 缓存处理后的内容到内存
     processedJsCache.set(jsPath, bundledCode);
-    // 保存中间产物到磁盘（保存rollup处理后的JS）
-    saveIntermediateFile(jsPath, 'js', bundledCode);
+    // 保存中间产物的逻辑已移动到统一处理阶段
     return bundledCode;
   } catch (error) {
     console.error(`处理JS文件出错 ${jsPath}:`, error);
@@ -338,88 +464,111 @@ async function processHtmlFile(htmlPath) {
     let htmlContent = fs.readFileSync(htmlPath, 'utf-8');
     const htmlDir = path.dirname(htmlPath);
 
+    // 统一处理所有资源（内部和外部的JS和CSS）的队列
+    const resourcesToProcess = [];
+    // 用于存储外部资源URL到哈希路径的映射，避免重复处理和下载
+    const urlToHashPathMap = new Map();
+
     // 1. 处理CSS文件 - 包括内部和外部CSS
     htmlContent = await (async () => {
       let result = htmlContent;
 
-      // 处理外部CSS链接
-      // 先匹配包含rel="stylesheet"的link标签，再从中提取href属性
-      const externalCssRegex = /<link\s+[^>]*?rel=(?:"|')stylesheet(?:"|')[^>]*?\/?>/gs;
-      const externalCssMatches = [...result.matchAll(externalCssRegex)];
-      console.log(`🔍 找到 ${externalCssMatches.length} 个外部CSS链接`);
+      // 处理所有CSS链接标签 - 先匹配所有包含rel="stylesheet"的link标签
+      const allCssLinksRegex = /<link\s+[^>]*?rel=(?:"|')stylesheet(?:"|')[^>]*?\/?>/gs;
+      const allCssLinks = [...result.matchAll(allCssLinksRegex)];
+      console.log(`🔍 找到 ${allCssLinks.length} 个CSS链接标签`);
 
-      for (const match of externalCssMatches) {
+      for (const match of allCssLinks) {
         try {
           // 从整个匹配的标签中提取href属性值（支持单引号和双引号）
-          const hrefMatch = match[0].match(/href=(?:"|')(https?:\/\/[^"\']+)(?:"|')/);
+          const hrefMatch = match[0].match(/href=(?:"|')([^"\']+)(?:"|')/);
           if (!hrefMatch) continue;
 
-          const externalUrl = hrefMatch[1];
-          console.log(`📄 处理外部CSS链接: ${externalUrl}`);
-          // 下载外部资源
-          const resource = await downloadExternalResource(externalUrl);
+          const href = hrefMatch[1];
 
-          if (resource.path !== externalUrl) { // 下载成功，使用本地路径
-            // 将外部资源添加到assetMap
-            assetMap.set(resource.path, createAssetEntry(resource.content, resource.type));
-            // 简化处理：只保留必要的rel和新的href属性，不再保存其他原始属性
-            result = result.replace(match[0], `<link rel="stylesheet" href="${resource.path}" />`);
-            console.log(`✅ 已替换外部CSS链接: ${externalUrl} -> ${resource.path}`);
+          // 判断是外部链接还是内部链接
+          if (href.startsWith('https://')) {
+            // 处理外部CSS链接
+            console.log(`📄 处理外部CSS链接: ${href}`);
+            // 下载外部资源
+            const resource = await downloadExternalResource(href);
+
+            if (resource.path !== href) { // 下载成功，使用本地路径
+              // 检查是否已经处理过此资源
+              if (!urlToHashPathMap.has(href)) {
+                // 不预生成哈希路径，将外部CSS资源添加到统一处理队列
+                resourcesToProcess.push({
+                  match: match[0],
+                  url: href,
+                  content: resource.content,
+                  type: 'css',
+                  resourceType: resource.type,
+                  isExternal: true,
+                  path: resource.path // 保存原始路径用于后续处理
+                });
+                console.log(`📥 已添加外部CSS到处理队列: ${href}`);
+              } else {
+                const hashedPath = urlToHashPathMap.get(href);
+                console.log(`🔄 跳过已处理的外部CSS: ${href}，直接使用哈希路径: ${hashedPath}`);
+                // 直接使用已存储的哈希路径替换HTML引用
+                htmlContent = htmlContent.replace(match[0], `<link rel="stylesheet" href="${hashedPath}" />`);
+                console.log(`✅ 使用已缓存的外部CSS: ${href} -> ${hashedPath}`);
+              }
+            } else {
+              // 下载失败，保留原始链接
+              console.log(`⚠️ 保留原始CSS链接: ${href}`);
+            }
           } else {
-            // 下载失败，保留原始链接
-            console.log(`⚠️  保留原始CSS链接: ${externalUrl}`);
+            // 处理内部CSS文件
+            const cssFilePath = href;
+            const cssFullPath = cssFilePath.startsWith('.')
+              ? path.resolve(htmlDir, cssFilePath)
+              : path.resolve(htmlDir, 'assets', cssFilePath);
+
+            if (fs.existsSync(cssFullPath)) {
+              // 使用简化的CSS处理函数，获取处理结果（包含导入的CSS路径）
+              const cssResult = processCssFile(cssFullPath);
+              const cssContent = cssResult.content;
+
+              // 创建导入的CSS文件的link标签
+              let importLinks = '';
+              if (typeof cssResult === 'object' && cssResult.importedPaths) {
+                for (const importedPath of cssResult.importedPaths) {
+                  importLinks += `<link rel="stylesheet" href="${importedPath}" />`;
+                  console.log(`已为导入的CSS添加link标签: ${importedPath}`);
+                }
+              }
+
+              // 将内部CSS资源添加到统一处理队列，并包含导入链接信息
+              resourcesToProcess.push({
+                match: match[0],
+                url: cssFilePath,
+                content: cssContent,
+                type: 'css',
+                resourceType: 'text/css',
+                isExternal: false,
+                filePath: cssFullPath,
+                importLinks: importLinks
+              });
+              console.log(`📥 已添加内部CSS到处理队列: ${cssFilePath}`);
+
+            } else {
+              console.warn(`CSS文件未找到: ${cssFullPath}`);
+            }
           }
         } catch (error) {
-          console.error(`❌ 处理外部CSS失败: ${match[1]}`, error.message);
+          console.error(`❌ 处理CSS链接失败:`, error.message);
           // 保留原始链接作为后备
         }
       }
 
-      // 处理内部CSS文件
-      result = result.replace(/<link\s+rel="stylesheet"\s+href="(?!https:\/\/)(\.?\/?[^"]+)"\s*\/?>/g, (match, cssFilePath) => {
-        try {
-          const cssFullPath = cssFilePath.startsWith('.')
-            ? path.resolve(htmlDir, cssFilePath)
-            : path.resolve(htmlDir, 'assets', cssFilePath);
-
-          if (fs.existsSync(cssFullPath)) {
-            // 使用简化的CSS处理函数，获取处理结果（包含导入的CSS路径）
-            const cssResult = processCssFile(cssFullPath);
-            const cssContent = cssResult.content;
-
-            // 使用哈希路径替代原始路径
-            const hashedAssetPath = generateHashedAssetPath(cssFullPath, cssContent, 'css');
-
-            // 将处理后的CSS内容添加到资源映射中
-            assetMap.set(hashedAssetPath, createAssetEntry(cssContent, 'text/css'));
-
-            console.log(`已处理CSS文件并映射到哈希路径: ${hashedAssetPath}`);
-
-            // 创建导入的CSS文件的link标签
-            let importLinks = '';
-            if (typeof cssResult === 'object' && cssResult.importedPaths) {
-              for (const importedPath of cssResult.importedPaths) {
-                importLinks += `<link rel="stylesheet" href="${importedPath}" />
-`;
-                console.log(`已为导入的CSS添加link标签: ${importedPath}`);
-              }
-            }
-
-            // 返回使用哈希路径的link标签，以及所有导入的CSS的link标签
-            return importLinks + `<link rel="stylesheet" href="${hashedAssetPath}" />`;
-          }
-          console.warn(`CSS文件未找到: ${cssFullPath}`);
-          return match;
-        } catch (error) {
-          console.error(`处理CSS文件出错 ${cssFilePath}:`, error);
-          return match;
-        }
-      });
+      // CSS链接现在通过统一的外部资源处理逻辑来替换，不再需要单独替换
 
       return result;
     })();
 
     // 2. 处理JS文件
+
     // 2.1 先处理外部JS链接
     htmlContent = await (async () => {
       let result = htmlContent;
@@ -442,12 +591,26 @@ async function processHtmlFile(htmlPath) {
           const resource = await downloadExternalResource(externalUrl);
 
           if (resource.path !== externalUrl) { // 下载成功，使用本地路径
-            // 将外部资源添加到assetMap
-            assetMap.set(resource.path, createAssetEntry(resource.content, resource.type));
-
-            // 简化处理：只保留必要的src属性，不再保存其他原始属性
-            result = result.replace(match[0], `<script src="${resource.path}"></script>`);
-            console.log(`✅ 已替换外部JS链接: ${externalUrl} -> ${resource.path}`);
+            // 检查是否已经处理过此资源
+            if (!urlToHashPathMap.has(externalUrl)) {
+              // 不预生成哈希路径，将外部JS资源添加到统一处理队列
+              resourcesToProcess.push({
+                match: match[0],
+                url: externalUrl,
+                content: resource.content,
+                type: 'js',
+                resourceType: resource.type,
+                isExternal: true,
+                path: resource.path // 保存原始路径用于后续处理
+              });
+              console.log(`📥 已添加外部JS到处理队列: ${externalUrl}`);
+            } else {
+              const hashedPath = urlToHashPathMap.get(externalUrl);
+              console.log(`🔄 跳过已处理的外部JS: ${externalUrl}，直接使用哈希路径: ${hashedPath}`);
+              // 直接使用已存储的哈希路径替换HTML引用
+              htmlContent = htmlContent.replace(match[0], `<script src="${hashedPath}"></script>`);
+              console.log(`✅ 使用已缓存的外部JS: ${externalUrl} -> ${hashedPath}`);
+            }
           } else {
             // 下载失败，保留原始链接
             console.log(`⚠️  保留原始JS链接: ${externalUrl}`);
@@ -475,10 +638,7 @@ async function processHtmlFile(htmlPath) {
       return match;
     });
 
-    // 统一处理所有JS文件的队列
-    const allJsToProcess = [];
-
-    // 2.3 处理module类型的JS文件（使用rollup处理后加入统一队列）
+    // 处理module类型的JS文件（使用rollup处理后加入统一队列）
     for (const { match, jsFilePath } of moduleJsMatches) {
       try {
         const jsFullPath = jsFilePath.startsWith('.')
@@ -490,12 +650,17 @@ async function processHtmlFile(htmlPath) {
           const bundledJs = await processJsFile(jsFullPath);
 
           // 将rollup处理后的代码加入统一处理队列
-          allJsToProcess.push({
+          resourcesToProcess.push({
             match,
-            jsFilePath,
+            url: jsFilePath,
             content: bundledJs,
+            type: 'js',
+            resourceType: 'application/javascript',
+            isExternal: false,
+            filePath: jsFullPath,
             isModule: true
           });
+          console.log(`📥 已添加内部Module JS到处理队列: ${jsFilePath}`);
         } else {
           console.warn(`JS文件未找到: ${jsFullPath}`);
         }
@@ -505,7 +670,7 @@ async function processHtmlFile(htmlPath) {
       }
     }
 
-    // 2.4 将普通JS文件加入统一处理队列
+    // 将普通JS文件加入统一处理队列
     for (const { match, jsFilePath } of regularJsMatches) {
       try {
         const jsFullPath = jsFilePath.startsWith('.')
@@ -517,12 +682,17 @@ async function processHtmlFile(htmlPath) {
           const jsContent = fs.readFileSync(jsFullPath, 'utf-8');
 
           // 加入统一处理队列
-          allJsToProcess.push({
+          resourcesToProcess.push({
             match,
-            jsFilePath,
+            url: jsFilePath,
             content: jsContent,
+            type: 'js',
+            resourceType: 'application/javascript',
+            isExternal: false,
+            filePath: jsFullPath,
             isModule: false
           });
+          console.log(`📥 已添加内部JS到处理队列: ${jsFilePath}`);
         } else {
           console.warn(`JS文件未找到: ${jsFullPath}`);
         }
@@ -532,48 +702,131 @@ async function processHtmlFile(htmlPath) {
       }
     }
 
-    // 2.5 统一处理所有JS文件（使用terser压缩）
-    for (const { match, jsFilePath, content } of allJsToProcess) {
-      try {
-        let jsContent = content;
+    // 统一处理所有资源（内部和外部的JS和CSS）
+    if (resourcesToProcess.length > 0) {
+      console.log(`🔄 开始统一处理 ${resourcesToProcess.length} 个资源`);
 
-        // 使用terser统一压缩所有JS代码
+      for (const resource of resourcesToProcess) {
         try {
-          const minified = await terser.minify(jsContent, { compress: { passes: 2 }, mangle: { toplevel: true } });
+          let processedContent = resource.content;
 
-          if (minified.error) {
-            console.warn(`JS压缩失败，使用原始内容: ${jsFilePath}`, minified.error);
-          } else if (minified.code !== undefined) {
-            jsContent = minified.code;
-            console.log(`已使用terser压缩JS文件: ${jsFilePath}`);
-            // 构建完整路径
-            const jsFullPath = jsFilePath.startsWith('.')
-              ? path.resolve(htmlDir, jsFilePath)
-              : path.resolve(htmlDir, 'assets', jsFilePath);
-            // 保存压缩后的JS作为中间产物
-            saveIntermediateFile(jsFullPath, 'minified_js', jsContent);
+          // 根据资源类型进行压缩处理
+          if (resource.type === 'js') {
+            // 使用terser压缩JS
+            try {
+              const minified = await terser.minify(processedContent, terserOptions);
+              if (minified.error) {
+                console.warn(`${resource.isExternal ? '外部' : '内部'}JS压缩失败，使用原始内容: ${resource.url}`, minified.error);
+              } else if (minified.code !== undefined) {
+                processedContent = minified.code;
+                console.log(`✅ 已压缩${resource.isExternal ? '外部' : '内部'}JS文件: ${resource.url}`);
+
+                // 统一保存压缩后的JS中间产物
+                const jsTempFilePath = resource.filePath || path.join(process.cwd(), `external_${encodeURIComponent(resource.url).replace(/[^a-zA-Z0-9]/g, '_')}.js`);
+                saveIntermediateFile(jsTempFilePath, 'minified_js', processedContent);
+                // 保存原始JS内容作为中间产物
+                saveIntermediateFile(jsTempFilePath, 'js', resource.content);
+              }
+            } catch (minifyError) {
+              console.warn(`${resource.isExternal ? '外部' : '内部'}JS压缩过程出错，使用原始内容: ${resource.url}`, minifyError);
+            }
+
+            // 压缩后统一生成哈希路径
+            let hashedPath;
+            if (resource.isExternal) {
+              // 对于外部资源，使用压缩后的内容生成哈希路径
+              hashedPath = generateHashedAssetPath(resource.url, processedContent);
+              console.log(`🔄 基于压缩后内容生成外部资源哈希路径: ${hashedPath}`);
+            } else {
+              // 对于内部资源，使用文件路径和压缩后的内容生成哈希路径
+              hashedPath = generateHashedAssetPath(resource.filePath, processedContent);
+              console.log(`🔄 基于压缩后内容生成内部资源哈希路径: ${hashedPath}`);
+            }
+
+            // 添加到assetMap
+            assetMap.set(hashedPath, createAssetEntry(processedContent, resource.resourceType));
+
+            // 替换HTML中的引用
+            htmlContent = htmlContent.replace(resource.match, `<script src="${hashedPath}"></script>`);
+            console.log(`✅ 已替换${resource.isExternal ? '外部' : '内部'}JS链接: ${resource.url} -> ${hashedPath}`);
+
+          } else if (resource.type === 'css') {
+            // 使用csso压缩CSS（如果可用）
+            try {
+              // 使用csso压缩CSS内容
+              console.log(`使用csso压缩CSS文件: ${resource.url}`);
+              processedContent = csso.minify(processedContent).css;
+              console.log(`✅ 已压缩${resource.isExternal ? '外部' : '内部'}CSS文件: ${resource.url}`);
+
+              // 统一保存压缩后的CSS中间产物和原始CSS内容
+              const cssTempFilePath = resource.filePath || path.join(process.cwd(), `external_${encodeURIComponent(resource.url).replace(/[^a-zA-Z0-9]/g, '_')}.css`);
+              saveIntermediateFile(cssTempFilePath, 'minified_css', processedContent);
+              saveIntermediateFile(cssTempFilePath, 'css', resource.content);
+            } catch (minifyError) {
+              console.warn(`${resource.isExternal ? '外部' : '内部'}CSS压缩过程出错，使用原始内容: ${resource.url}`, minifyError);
+            }
+
+            // 压缩后统一生成哈希路径
+            let hashedPath;
+            if (resource.isExternal) {
+              // 对于外部资源，使用压缩后的内容生成哈希路径
+              hashedPath = generateHashedAssetPath(resource.url, processedContent);
+              console.log(`🔄 基于压缩后内容生成外部资源哈希路径: ${hashedPath}`);
+            } else {
+              // 对于内部资源，使用文件路径和压缩后的内容生成哈希路径
+              hashedPath = generateHashedAssetPath(resource.filePath, processedContent);
+              console.log(`🔄 基于压缩后内容生成内部资源哈希路径: ${hashedPath}`);
+            }
+
+            // 添加到assetMap
+            assetMap.set(hashedPath, createAssetEntry(processedContent, resource.resourceType));
+
+            // 构建导入CSS的link标签（如果有）
+            let importLinks = '';
+            if (resource.filePath && importedCssMap) {
+              const importedPaths = importedCssMap.get(resource.filePath) || [];
+              for (const importPath of importedPaths) {
+                if (!processedImportedCss.has(importPath)) {
+                  // 处理导入的CSS文件
+                  console.log(`处理导入的CSS文件: ${importPath}`);
+                  const importContent = fs.readFileSync(importPath, 'utf-8');
+
+                  // 压缩导入的CSS
+                  let minifiedImport = importContent;
+                  try {
+                    minifiedImport = csso.minify(importContent).css;
+                    console.log(`✅ 已压缩导入的CSS文件: ${importPath}`);
+                    // 保存导入CSS的中间产物
+                    saveIntermediateFile(importPath, 'css', importContent);
+                    saveIntermediateFile(importPath, 'minified_css', minifiedImport);
+                  } catch (e) {
+                    console.warn(`导入的CSS压缩出错，使用原始内容: ${importPath}`, e);
+                    // 即使压缩失败，也保存原始内容作为中间产物
+                    saveIntermediateFile(importPath, 'css', importContent);
+                  }
+
+                  // 生成哈希路径
+                  const importHashedPath = generateHashedAssetPath(importPath, minifiedImport);
+                  assetMap.set(importHashedPath, createAssetEntry(minifiedImport, 'text/css'));
+
+                  // 添加link标签
+                  importLinks += `<link rel="stylesheet" href="${importHashedPath}" />\n`;
+                  processedImportedCss.add(importPath);
+
+                  console.log(`✅ 已添加导入的CSS为link标签: ${importPath} -> ${importHashedPath}`);
+                }
+              }
+            }
+
+            // 替换HTML中的引用，包含导入的CSS link标签
+            const replacement = importLinks + `<link rel="stylesheet" href="${hashedPath}" />`;
+            htmlContent = htmlContent.replace(resource.match, replacement);
+            console.log(`✅ 已替换${resource.isExternal ? '外部' : '内部'}CSS链接: ${resource.url} -> ${hashedPath}`);
           }
-        } catch (minifyError) {
-          console.warn(`JS压缩过程出错，使用原始内容: ${jsFilePath}`, minifyError);
+        } catch (error) {
+          console.error(`❌ 处理${resource.isExternal ? '外部' : '内部'}资源失败: ${resource.url}`, error.message);
+          // 出错时保留原始链接
         }
-
-        // 构建完整路径
-        const jsFullPath = jsFilePath.startsWith('.')
-          ? path.resolve(htmlDir, jsFilePath)
-          : path.resolve(htmlDir, 'assets', jsFilePath);
-
-        // 使用哈希路径替代原始路径
-        const hashedAssetPath = generateHashedAssetPath(jsFullPath, jsContent, 'js');
-
-        // 将处理后的JS内容添加到资源映射中
-        assetMap.set(hashedAssetPath, createAssetEntry(jsContent, 'application/javascript'));
-
-        // 替换为指向哈希路径的引用
-        htmlContent = htmlContent.replace(match, `<script src="${hashedAssetPath}"></script>`);
-        console.log(`已处理JS文件并映射到哈希路径: ${hashedAssetPath}`);
-      } catch (error) {
-        console.error(`处理JS文件出错 ${jsFilePath}:`, error);
-        // 出错时保留原始引用
       }
     }
 
@@ -700,7 +953,7 @@ function htmlProcessorPlugin() {
       // 对于CSS文件，确保它们被添加到资源映射中
       if (id.endsWith('.css')) {
         // 使用哈希路径替代原始路径
-        const hashedAssetPath = generateHashedAssetPath(id, code, 'css');
+        const hashedAssetPath = generateHashedAssetPath(id, code);
 
         // 直接将CSS内容添加到资源映射中
         assetMap.set(hashedAssetPath, createAssetEntry(code, 'text/css'));
@@ -743,55 +996,7 @@ const mainConfig = {
           console.log(`二次压缩前的worker.js: ${preCompressPath} (${fs.statSync(preCompressPath).size} 字节)`);
 
           // 使用terser进行安全压缩，避免过度优化导致的功能问题
-          const result = await terser.minify(workerContent, {
-            mangle: {
-              toplevel: true,
-              eval: true,
-              keep_fnames: false
-            },
-            compress: {
-              // 标准压缩次数
-              passes: 2,
-              // 启用更激进的压缩选项
-              pure_getters: true,
-              toplevel: true,
-              module: true,
-              drop_console: true,
-              drop_debugger: true,
-              dead_code: true,
-              conditionals: true,
-              booleans: true,
-              unused: true,
-              if_return: true,
-              join_vars: true,
-              reduce_vars: true,
-              hoist_funs: true,
-              hoist_vars: true,
-              loops: true,
-              collapse_vars: true,
-              inline: true,
-              pure_funcs: ['console.log', 'console.debug', 'console.info', 'console.warn', 'console.error'],
-              // 不安全优化选项
-              unsafe: true,
-              unsafe_arrows: true,
-              unsafe_comps: true,
-              unsafe_Function: true,
-              unsafe_math: true,
-              unsafe_methods: true,
-              unsafe_proto: true,
-              unsafe_regexp: true,
-              unsafe_undefined: true
-            },
-            format: {
-              comments: false,
-              beautify: false,
-              // 使用更紧凑的语法
-              braces: false,
-              semicolons: false
-            },
-            // 启用ECMAScript最新特性以提高压缩效果
-            ecma: 9999
-          });
+          const result = await terser.minify(workerContent, terserOptions);
 
           if (result.error) {
             console.error('terser额外压缩失败:', result.error);
@@ -836,7 +1041,7 @@ function assetFileOutputPlugin() {
 
         try {
           fs.writeFileSync(filePath, assetEntry.content);
-          console.log(`已保存静态资源: ${filePath}`);
+          console.log(`已保存静态资源: ${filePath} (${assetEntry.content.length} 字节)`);
         } catch (error) {
           console.error(`保存静态资源失败 ${filePath}:`, error);
         }

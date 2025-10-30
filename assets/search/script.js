@@ -155,7 +155,7 @@ function performSearch(params, page = 1) {
         .catch(error => {
             // 禁用加载状态
             spinner.classList.add('hidden');
-            buttonText.textContent = '搜索文件';
+            buttonText.textContent = '搜索三方图';
             searchButton.disabled = false;
             console.error('Search failed:', error);
             resultsContainer.innerHTML = `<p class="text-center text-red-500">搜索失败：服务器或网络错误。</p>`;
