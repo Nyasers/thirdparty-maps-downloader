@@ -23,7 +23,7 @@ const terserOptions = {
   },
   compress: {
     // 增加压缩次数以获得更好效果
-    passes: 3,
+    passes: 4,
     // 基础压缩选项
     pure_getters: true,
     toplevel: true,
@@ -97,11 +97,14 @@ function generateHash(content) {
 // 映射表，存储原始路径到哈希路径的映射
 const originalToHashedPathMap = new Map();
 // 存储外部资源URL到哈希路径的映射
-const externalResourceMap = new Map();
+// 全局外部资源缓存，确保多个HTML文件共享缓存
+let externalResourceMap = new Map();
 // 存储CSS文件路径到其导入的CSS文件路径数组的映射
 let importedCssMap = new Map();
 // 存储已处理的导入CSS文件路径，避免重复处理
 let processedImportedCss = new Set();
+// 用于跟踪正在下载的资源，避免并发下载
+let downloadPromises = new Map();
 
 // 生成哈希化的资源路径，并添加适当的文件后缀
 // 根据要求：外部资源根据MIME type确定后缀，内部资源直接使用原后缀
@@ -171,25 +174,35 @@ function getExtensionFromMimeType(mimeType) {
   return mimeToExt[baseMimeType] || '';
 }
 
-// 下载外部资源，支持重定向
+// 下载外部资源，支持重定向和并发控制
 async function downloadExternalResource(url, maxRedirects = 5) {
-  console.log(`🔄 开始下载外部资源: ${url}`);
-
-  // 如果已经缓存过，直接返回
+  // 1. 先检查最终结果缓存
   if (externalResourceMap.has(url)) {
-    console.log(`✅ 外部资源已缓存: ${url}`);
+    console.log(`✅ 外部资源已缓存，跳过下载: ${url}`);
     return externalResourceMap.get(url);
   }
 
-  // 避免无限重定向
-  if (maxRedirects <= 0) {
-    console.warn(`❌ 达到最大重定向次数，无法下载: ${url}`);
-    const fallbackEntry = { path: url, content: '', type: 'text/plain' };
-    externalResourceMap.set(url, fallbackEntry);
-    return fallbackEntry;
+  // 2. 检查是否已经有正在进行的下载请求，如果有则共享同一个Promise
+  if (downloadPromises.has(url)) {
+    console.log(`🔄 外部资源正在下载中，共享下载结果: ${url}`);
+    return downloadPromises.get(url);
   }
 
-  return new Promise((resolve) => {
+  console.log(`🔄 开始下载外部资源: ${url}`);
+
+  // 3. 创建新的下载Promise并缓存
+  const downloadPromise = new Promise((resolve) => {
+    // 避免无限重定向
+    if (maxRedirects <= 0) {
+      console.warn(`❌ 达到最大重定向次数，无法下载: ${url}`);
+      const fallbackEntry = { path: url, content: '', type: 'text/plain' };
+      externalResourceMap.set(url, fallbackEntry);
+      // 清理缓存
+      downloadPromises.delete(url);
+      resolve(fallbackEntry);
+      return;
+    }
+
     const protocol = url.startsWith('https') ? https : http;
     console.log(`🌐 使用协议: ${protocol === https ? 'HTTPS' : 'HTTP'}`);
 
@@ -205,6 +218,8 @@ async function downloadExternalResource(url, maxRedirects = 5) {
         req.destroy(); // 销毁请求
         const fallbackEntry = { path: url, content: '', type: 'text/plain' };
         externalResourceMap.set(url, fallbackEntry);
+        // 清理缓存
+        downloadPromises.delete(url);
         resolve(fallbackEntry);
       });
 
@@ -225,6 +240,9 @@ async function downloadExternalResource(url, maxRedirects = 5) {
 
         // 确保当前响应被消耗，避免内存泄漏
         res.resume();
+
+        // 清理当前URL的下载Promise缓存
+        downloadPromises.delete(url);
 
         // 递归调用以下载重定向后的资源
         downloadExternalResource(redirectUrl, maxRedirects - 1)
@@ -250,6 +268,8 @@ async function downloadExternalResource(url, maxRedirects = 5) {
         res.resume();
         const fallbackEntry = { path: url, content: '', type: 'text/plain' };
         externalResourceMap.set(url, fallbackEntry);
+        // 清理缓存
+        downloadPromises.delete(url);
         resolve(fallbackEntry);
         return;
       }
@@ -266,33 +286,48 @@ async function downloadExternalResource(url, maxRedirects = 5) {
         // 存储外部资源映射，使用原始URL作为路径
         const resourceEntry = { path: url, content, type: contentType };
         externalResourceMap.set(url, resourceEntry);
-
-        // 保存中间产物的逻辑已移动到统一处理阶段
-
-        console.log(`✅ 外部资源下载成功: ${url}`);
+        // 清理缓存
+        downloadPromises.delete(url);
         resolve(resourceEntry);
+      });
+
+      // 处理响应错误
+      res.on('error', (error) => {
+        console.error(`❌ 响应错误: ${url}`, error.message);
+        const fallbackEntry = { path: url, content: '', type: 'text/plain' };
+        externalResourceMap.set(url, fallbackEntry);
+        // 清理缓存
+        downloadPromises.delete(url);
+        resolve(fallbackEntry);
       });
     });
 
-    // 设置请求超时
-    req.on('timeout', () => {
-      console.error(`❌ 请求超时: ${url}`);
-      req.destroy(); // 销毁请求
+    // 处理请求错误
+    req.on('error', (error) => {
+      console.error(`❌ 请求错误: ${url}`, error.message);
       const fallbackEntry = { path: url, content: '', type: 'text/plain' };
       externalResourceMap.set(url, fallbackEntry);
+      // 清理缓存
+      downloadPromises.delete(url);
       resolve(fallbackEntry);
     });
 
-    // 错误处理
-    req.on('error', (err) => {
-      console.error(`❌ 下载外部资源出错: ${url}`, err.message);
-      // 按照要求，下载出错时保留原始URL
+    // 处理请求超时
+    req.on('timeout', () => {
+      console.error(`❌ 请求超时: ${url}`);
+      req.destroy();
       const fallbackEntry = { path: url, content: '', type: 'text/plain' };
       externalResourceMap.set(url, fallbackEntry);
-      console.warn(`⚠️  下载出错，保留原始URL: ${url}`);
+      // 清理缓存
+      downloadPromises.delete(url);
       resolve(fallbackEntry);
     });
   });
+
+  // 缓存下载Promise以便并发请求复用
+  downloadPromises.set(url, downloadPromise);
+
+  return downloadPromise;
 }
 
 // 缓存目录路径
@@ -648,7 +683,11 @@ async function processHtmlFile(htmlPath) {
 
           const externalUrl = srcMatch[1];
           console.log(`📄 处理外部JS链接: ${externalUrl}`);
-          // 下载外部资源
+          // 预先检查缓存状态，提供清晰的日志
+          if (externalResourceMap.has(externalUrl)) {
+            console.log(`📝 外部资源在缓存中，将从缓存获取: ${externalUrl}`);
+          }
+          // 下载外部资源（会自动检查缓存）
           const resource = await downloadExternalResource(externalUrl);
 
           if (resource.path !== externalUrl) { // 下载成功，使用本地路径
