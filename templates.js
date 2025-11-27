@@ -4,7 +4,6 @@
 import htmlShellTemplate from './assets/main/index.html';
 import successButtonTemplate from './assets/main/action-button-success.html';
 import disabledButtonTemplate from './assets/main/action-button-disabled.html';
-import diagnosticBlockTemplate from './assets/main/diagnostic-block.html';
 
 // 导入工具函数
 import { replaceTemplatePlaceholders, formatBytes } from './utils.js';
@@ -28,7 +27,6 @@ export function getHtmlShell(params) {
         fileName,
         inlineSizeText,
         actionButton,
-        diagnosticBlock,
         finalRedirectUrl
     } = params;
 
@@ -44,7 +42,6 @@ export function getHtmlShell(params) {
         fileName,
         inlineSizeText,
         actionButton,
-        diagnosticBlock,
         finalRedirectUrl
     };
 
@@ -78,13 +75,10 @@ export function assembleTemplateData(data) {
         disabledText: externalStatus === 503 ? "服务器连接失败，请稍后再试" : "地图不可用，无法下载"
     };
 
-    // 替换占位符
-    const diagnosticBlock = replaceTemplatePlaceholders(diagnosticBlockTemplate, templateParams);
     const actionButtons = fileExists
         ? replaceTemplatePlaceholders(successButtonTemplate, templateParams)
         : replaceTemplatePlaceholders(disabledButtonTemplate, templateParams);
     return {
-        diagnosticBlock,
         actionButtons
     };
 }
@@ -126,7 +120,6 @@ export function generateHtmlResponse(filePath, checkResult) {
         fileName,
         inlineSizeText,
         actionButton: templateData.actionButtons,
-        diagnosticBlock: templateData.diagnosticBlock,
         finalRedirectUrl: checkResult.finalRedirectUrl // 确保finalRedirectUrl被传递给getHtmlShell
     };
 

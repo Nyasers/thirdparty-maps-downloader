@@ -21,24 +21,12 @@
             </div>
 
             <div class="mt-4 pt-4 border-t border-gray-200">
-                <!-- 标签：地图 -->
-                <p class="text-sm text-gray-500 mb-1">地图:</p>
-                <!-- 地图的完整显示名称 -->
                 <p class="text-xl font-extrabold text-gray-800 break-words">{{fileName}}
+                    <span class="bg-gray-100 p-1 rounded text-sm text-gray-600">({{inlineSizeText}})</span>
                 </p>
-
-                <!-- 组合文件名和文件大小 -->
-                <div class="mt-4">
-                    <p class="text-sm text-gray-500 flex items-center">
-                        文件: <code class="bg-gray-100 p-1 rounded text-xs text-gray-600">{{fileName}}</code>
-                        ({{inlineSizeText}})
-                    </p>
-                </div>
             </div>
 
             {{actionButton}}
-
-            {{diagnosticBlock}}
         </div>
     </div>
     <script src="./script.js"></script>
