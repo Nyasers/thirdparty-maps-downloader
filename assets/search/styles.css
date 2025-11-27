@@ -1,6 +1,0 @@
-@import '../general/styles.css';
-
-/* 隐藏默认的 HTML5 验证错误提示，让自定义消息更容易实现 */
-input:invalid {
-    box-shadow: none;
-}

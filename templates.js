@@ -2,7 +2,6 @@
 
 // --- HTML 模板常量集 ----------------------------------------------------
 import htmlShellTemplate from './assets/main/index.html';
-import searchShellTemplate from './assets/search/index.html';
 import successButtonTemplate from './assets/main/action-button-success.html';
 import disabledButtonTemplate from './assets/main/action-button-disabled.html';
 import diagnosticBlockTemplate from './assets/main/diagnostic-block.html';
@@ -19,8 +18,8 @@ import { replaceTemplatePlaceholders, formatBytes } from './utils.js';
  */
 export function getHtmlShell(params) {
     const {
+        displayTitleCn,
         mapGroup,
-        missionDisplayTitle,
         statusText,
         themeColor,
         cardColor,
@@ -36,7 +35,7 @@ export function getHtmlShell(params) {
     // 直接使用变量名作为占位符键，减少额外空间占用
     const placeholders = {
         mapGroup,
-        missionDisplayTitle,
+        displayTitleCn,
         statusText,
         themeColor,
         cardColor,
@@ -90,42 +89,13 @@ export function assembleTemplateData(data) {
     };
 }
 
-/**
- * 搜索页面的 HTML 骨架。
- * @param {string} mapGroupOptions <select> 标签内的选项 HTML
- * @returns {string} 完整的 HTML 字符串
- */
-function getSearchShell(mapGroupOptions) {
-    // 使用通用的占位符替换函数
-    return replaceTemplatePlaceholders(searchShellTemplate, { mapGroupOptions }).trim();
-}
 
-/**
- * 导出函数：生成完整的地图搜索页面的 HTML。
- * @returns {string} 完整的搜索页面 HTML
- */
-export function getSearchPageHtml() {
-    // 模板使用的地图组列表，根据用户提供的 API 结构，使用 A 和 B
-    const defaultMapGroups = [
-        { value: "A", label: "三方A" },
-        { value: "B", label: "三方B" },
-    ];
-
-    const optionsHtml = defaultMapGroups
-        .map(
-            (group, index) =>
-                `<option value="${group.value}" ${index === 0 ? "selected" : ""}>${group.label}</option>`
-        )
-        .join("");
-
-    return getSearchShell(optionsHtml);
-}
 
 /**
  * 根据文件检查结果生成一个用户友好的 HTML 响应页面。
  * 负责收集所有动态数据并调用模板。
  */
-export function generateHtmlResponse(mapGroup, missionDisplayTitle, checkResult) {
+export function generateHtmlResponse(filePath, checkResult) {
     // 使用新的 assembleTemplateData 函数一次性完成所有数据组装和 HTML 生成
     // checkResult 包含了 { fileExists, fullCheckUrl, externalStatus, details, fileSize, finalRedirectUrl }
 
@@ -137,7 +107,7 @@ export function generateHtmlResponse(mapGroup, missionDisplayTitle, checkResult)
     const cardColor = "bg-white";
     const textColor = "text-gray-900";
     const icon = checkResult.fileExists ? "✓" : "✗";
-    const fileName = `${mapGroup}-${missionDisplayTitle}.7z`;
+    const fileName = filePath.split("/").pop();
     const inlineSizeText = checkResult.fileSize ? formatBytes(checkResult.fileSize) : "未知大小";
 
     // 组装模板数据
@@ -148,8 +118,6 @@ export function generateHtmlResponse(mapGroup, missionDisplayTitle, checkResult)
 
     // 准备完整的参数对象
     const params = {
-        mapGroup,
-        missionDisplayTitle,
         statusText,
         themeColor,
         cardColor,
@@ -174,13 +142,4 @@ export function generateHtmlResponse(mapGroup, missionDisplayTitle, checkResult)
     });
 }
 
-/**
- * 生成搜索页面响应
- */
-export function generateSearchResponse() {
-    const htmlContent = getSearchPageHtml();
-    return new Response(htmlContent, {
-        headers: { "content-type": "text/html;charset=UTF-8" },
-        status: 200,
-    });
-}
+
